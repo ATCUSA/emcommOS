@@ -55,7 +55,6 @@ def publish_command(
     root: Path,
     repo: Path,
     targets: dict[str, Target],
-    new_rpms: list[str],
     key_file: Path,
     passphrase_file: Path,
 ) -> list[str]:
@@ -72,7 +71,6 @@ def publish_command(
         "-v", f"{passphrase_file}:/keys/passphrase:ro,z",
         "-e", f"DEB_SUITES={' '.join(deb_suites)}",
         "-e", f"RPM_DIRS={' '.join(rpm_dirs)}",
-        "-e", f"NEW_RPMS={' '.join(new_rpms)}",
         PUBLISH_IMAGE, "bash", "/emcomm/tools/container/publish.sh",
     ]
 
@@ -114,10 +112,7 @@ def publish(
             "(different primary fingerprint)"
         )
     repo.mkdir(parents=True, exist_ok=True)
-    placed = place_packages(dist, repo, targets)
-    new_rpms = [p.relative_to(repo).as_posix()
-                for files in placed.values() for p in files if p.suffix == ".rpm"]
-    run(publish_command(engine, root, repo, targets, new_rpms, key_file, passphrase_file),
-        check=True)
+    place_packages(dist, repo, targets)
+    run(publish_command(engine, root, repo, targets, key_file, passphrase_file), check=True)
     shutil.copy2(public_key, repo / "emcomm-archive-keyring.asc")
     write_manifests(repo, targets)

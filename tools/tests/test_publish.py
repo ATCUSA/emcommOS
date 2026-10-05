@@ -36,10 +36,10 @@ def test_publish_command(fake_repo, tmp_path):
     repo = tmp_path / "repo"
     place_packages(make_dist(tmp_path), repo, targets)
     cmd = publish_command(Engine(), Path("/src"), repo, targets,
-                          ["rpm/fedora-44/aarch64/x.rpm"], tmp_path / "k.asc", tmp_path / "pp")
+                          tmp_path / "k.asc", tmp_path / "pp")
     assert "DEB_SUITES=debian-13" in cmd
     assert "RPM_DIRS=rpm/fedora-44/aarch64" in cmd
-    assert "NEW_RPMS=rpm/fedora-44/aarch64/x.rpm" in cmd
+    assert not any(c.startswith("NEW_RPMS") for c in cmd)
     assert f"{tmp_path / 'k.asc'}:/keys/signing.asc:ro,z" in cmd
     assert cmd[-3:] == ["docker.io/library/debian:13", "bash", "/emcomm/tools/container/publish.sh"]
 

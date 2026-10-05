@@ -50,14 +50,15 @@ def build_demo(targets, arch, dist, tmp_path, name):
                       tmp_path / "w")
 
 
-def install_all(repo, names):
+def install_all(repo, names, deb_names=None):
+    dpkgs = " ".join(f"emcomm-{n}" for n in (deb_names or names))
     pkgs = " ".join(f"emcomm-{n}" for n in names)
     debian = (
         "cp /repo/emcomm-archive-keyring.asc /usr/share/keyrings/ && "
         "printf 'Types: deb\\nURIs: file:/repo/deb\\nSuites: debian-13\\nComponents: main\\n"
         "Signed-By: /usr/share/keyrings/emcomm-archive-keyring.asc\\n' "
         "> /etc/apt/sources.list.d/emcomm.sources && apt-get update -qq && "
-        f"apt-get install -y -qq {pkgs} && dpkg -s {pkgs}"
+        f"apt-get install -y -qq {dpkgs} && dpkg -s {dpkgs}"
     )
     fedora = (
         "printf '[emcomm]\\nname=emcomm\\nbaseurl=file:///repo/rpm/fedora-44/$basearch\\n"
@@ -79,6 +80,7 @@ def test_publish_then_install(fake_repo, tmp_path):
     arch = host_arch()
     targets = load_targets(fake_repo)
     dist = tmp_path / "dist"
+    (tmp_path / "empty-dist").mkdir()
     build_demo(targets, arch, dist, tmp_path, "demo")
     secret, public, passphrase = make_key(tmp_path)
     repo = tmp_path / "public/testing"
@@ -97,3 +99,15 @@ def test_publish_then_install(fake_repo, tmp_path):
     assert not any(ln.split()[-1] in ("Release", "InRelease", "Release.gpg")
                    for ln in release.splitlines() if ln.startswith(" ") and ln.split())
     install_all(repo, ["demo", "demo2"])
+
+    # Simulated partial failure: an unsigned RPM already sits in the tree, unknown to publish.
+    dist3 = tmp_path / "dist3"
+    build_demo(targets, arch, dist3, tmp_path, "demo3")
+    unsigned = next(dist3.rglob("*.rpm"))
+    placed_rpm = rpm1.parent / unsigned.name
+    shutil.copy2(unsigned, placed_rpm)
+    before_signed = rpm1.read_bytes()
+    publish(REAL_ROOT, tmp_path / "empty-dist", repo, targets, secret, passphrase, public)
+    assert placed_rpm.read_bytes() != unsigned.read_bytes()
+    assert rpm1.read_bytes() == before_signed
+    install_all(repo, ["demo", "demo2", "demo3"], ["demo", "demo2"])

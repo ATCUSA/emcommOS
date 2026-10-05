@@ -15,7 +15,7 @@ gpg --batch --quiet --pinentry-mode loopback --passphrase-file /keys/passphrase 
 # Select the signing-capable secret subkey explicitly (the primary is certify-only
 # and may be a stub); the trailing "!" forces gpg to use exactly that key.
 KEYID=$(gpg --batch --list-secret-keys --with-colons | awk -F: '
-  $1 == "ssb" && $12 ~ /s/ {want = 1; next}
+  $1 == "ssb" && $12 ~ /s/ && $2 !~ /^[er]$/ {want = 1; next}
   $1 == "ssb" || $1 == "sec" {want = 0}
   want && $1 == "fpr" {print $10 "!"; exit}')
 [ -n "$KEYID" ] || { echo "no signing subkey found in /keys/signing.asc" >&2; exit 1; }
@@ -52,10 +52,13 @@ cat > "$HOME/.rpmmacros" <<EOM
 %_gpg_path $GNUPGHOME
 %_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback --passphrase-file /keys/passphrase
 EOM
-for rpm_file in $NEW_RPMS; do
-  rpmsign --addsign "$rpm_file" >/dev/null
-done
 for dir in $RPM_DIRS; do
+  # State-based and idempotent: sign every RPM that carries no signature yet.
+  while IFS= read -r -d '' rpm_file; do
+    if ! rpm -qp --qf '%{RSAHEADER:pgpsig}%{DSAHEADER:pgpsig}\n' "$rpm_file" | grep -q 'Key ID'; then
+      rpmsign --addsign "$rpm_file" >/dev/null
+    fi
+  done < <(find "$dir" -name '*.rpm' -print0 | sort -z)
   createrepo_c --quiet --update "$dir"
   "${SIGN[@]}" --armor --detach-sign -o "$dir/repodata/repomd.xml.asc" "$dir/repodata/repomd.xml"
 done
