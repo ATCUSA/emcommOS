@@ -42,6 +42,19 @@ class BuildSettings:
     engine: Engine = field(default_factory=Engine)
 
 
+def clean_workdir(workdir: Path) -> None:
+    """Remove a previous build directory, explaining how to recover if that is not permitted."""
+    if not workdir.exists():
+        return
+    try:
+        shutil.rmtree(workdir)
+    except PermissionError as e:
+        raise BuildError(
+            f"cannot remove {workdir} ({e.filename or e}): it holds files owned by a "
+            f"container sub-UID; remove it with `podman unshare rm -rf {workdir}`"
+        ) from e
+
+
 def host_arch() -> str:
     machine = platform.machine()
     try:
@@ -120,8 +133,7 @@ def run(settings: BuildSettings, *, recipes: dict[str, Recipe] | None = None) ->
         r = recipes[name]
         print(f"==> {target.name}/{arch}: {r.package} {r.version}-{r.release}")
         workdir = settings.work / target.name / arch / name
-        if workdir.exists():
-            shutil.rmtree(workdir)
+        clean_workdir(workdir)
         workdir.mkdir(parents=True)
         deps = [*r.depends_on, *r.requires]
         if deps:

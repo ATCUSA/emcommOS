@@ -4,6 +4,17 @@
 # so that it installs into /work/destdir/opt/emcomm.
 set -euo pipefail
 
+# Under rootless podman, container root is the invoking host user, but files owned by any
+# other uid/gid (e.g. restored by `tar -x` as root from an archive made by uid 501) map to
+# unmapped sub-UIDs the host user cannot delete. Normalise ownership on every exit.
+normalize_ownership() {
+  local p
+  for p in /work/src /work/destdir /work/runtime-deps.txt; do
+    if [[ -e $p ]]; then chown -R -h 0:0 "$p" 2>/dev/null || true; fi
+  done
+}
+trap normalize_ownership EXIT
+
 bash /emcomm/tools/container/repos.sh
 
 install_packages() {

@@ -4,6 +4,7 @@ import shutil
 import pytest
 from conftest import REAL_ROOT, TARGETS, write_recipe
 
+from emcomm_build.build import clean_workdir
 from emcomm_build.container import Engine, run_build
 from emcomm_build.model import load_recipes, load_targets
 
@@ -77,3 +78,30 @@ def test_build_script_only_has_no_runtime_deps(hello_repo, tmp_path):
     destdir, deps = run_build(Engine(), recipe, tgt, hello_repo, workdir)
     assert (destdir / "opt/emcomm/bin/hi").is_file()
     assert deps == []
+
+
+FOREIGN_OWNER_BUILD = """\
+set -euo pipefail
+mkdir -p payload
+echo ok > payload/data.txt
+tar --owner=501 --group=501 -czf foreign.tar.gz payload
+rm -rf payload
+tar -xzf foreign.tar.gz   # as root: restores uid/gid 501
+mkdir -p "$DESTDIR$PREFIX/bin"
+cp payload/data.txt "$DESTDIR$PREFIX/bin/data"
+"""
+
+
+def test_foreign_owned_extraction_leaves_host_deletable_workdir(hello_repo, tmp_path):
+    write_recipe(hello_repo, "foreign", HELLO_RECIPE.replace("name: hello", "name: foreign"),
+                 build_sh=FOREIGN_OWNER_BUILD)
+    recipe = load_recipes(hello_repo)["foreign"]
+    tgt = load_targets(hello_repo)["debian-13"]
+    workdir = tmp_path / "work" / "foreign"
+    for _ in range(2):
+        clean_workdir(workdir)
+        (workdir / "src").mkdir(parents=True)
+        destdir, _deps = run_build(Engine(), recipe, tgt, hello_repo, workdir)
+        assert (destdir / "opt/emcomm/bin/data").is_file()
+    shutil.rmtree(workdir)
+    assert not workdir.exists()
