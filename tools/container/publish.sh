@@ -12,7 +12,13 @@ chmod 700 "$GNUPGHOME"
 echo allow-loopback-pinentry > "$GNUPGHOME/gpg-agent.conf"
 gpg --batch --quiet --pinentry-mode loopback --passphrase-file /keys/passphrase \
     --import /keys/signing.asc
-KEYID=$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1 == "sec" {print $5; exit}')
+# Select the signing-capable secret subkey explicitly (the primary is certify-only
+# and may be a stub); the trailing "!" forces gpg to use exactly that key.
+KEYID=$(gpg --batch --list-secret-keys --with-colons | awk -F: '
+  $1 == "ssb" && $12 ~ /s/ {want = 1; next}
+  $1 == "ssb" || $1 == "sec" {want = 0}
+  want && $1 == "fpr" {print $10 "!"; exit}')
+[ -n "$KEYID" ] || { echo "no signing subkey found in /keys/signing.asc" >&2; exit 1; }
 SIGN=(gpg --batch --yes --pinentry-mode loopback --passphrase-file /keys/passphrase
       --local-user "$KEYID")
 
@@ -25,6 +31,8 @@ for suite in $DEB_SUITES; do
     (cd deb && apt-ftparchive --arch "$arch" packages "pool/$suite") > "$dist/main/binary-$arch/Packages"
     gzip -9kf "$dist/main/binary-$arch/Packages"
   done
+  rm -f "$dist/Release" "$dist/InRelease" "$dist/Release.gpg"
+  release_tmp=$(mktemp)
   apt-ftparchive \
     -o APT::FTPArchive::Release::Origin=emcommOS \
     -o APT::FTPArchive::Release::Label=emcommOS \
@@ -32,8 +40,9 @@ for suite in $DEB_SUITES; do
     -o "APT::FTPArchive::Release::Codename=$suite" \
     -o "APT::FTPArchive::Release::Architectures=amd64 arm64" \
     -o APT::FTPArchive::Release::Components=main \
-    release "$dist" > /tmp/Release
-  mv /tmp/Release "$dist/Release"
+    release "$dist" > "$release_tmp"
+  mv "$release_tmp" "$dist/Release"
+  chmod 644 "$dist/Release"
   "${SIGN[@]}" --clearsign -o "$dist/InRelease" "$dist/Release"
   "${SIGN[@]}" --armor --detach-sign -o "$dist/Release.gpg" "$dist/Release"
 done

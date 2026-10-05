@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from .container import Engine
-from .model import ARCHES, RPM_ARCH, Target
+from .model import ARCHES, RPM_ARCH, DefinitionError, Target
 from .plan import repo_path
 
 PUBLISH_IMAGE = "docker.io/library/debian:13"
@@ -25,6 +26,8 @@ def place_packages(
         for adir in sorted(p for p in tdir.iterdir() if p.is_dir()):
             for pkg in sorted(adir.glob(f"*.{target.format}")):
                 dest = repo / repo_path(target, adir.name, pkg.name)
+                if dest.exists():
+                    continue  # published files are immutable; never re-copy or re-sign
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(pkg, dest)
                 placed.setdefault((target.name, adir.name), []).append(dest)
@@ -74,6 +77,22 @@ def publish_command(
     ]
 
 
+def primary_fingerprint(key_file: Path) -> str:
+    """Fingerprint of the first primary key in an armored key file (public or secret)."""
+    with tempfile.TemporaryDirectory() as home:
+        out = subprocess.run(
+            ["gpg", "--batch", "--homedir", home, "--show-keys", "--with-colons", str(key_file)],
+            check=True, capture_output=True, text=True,
+        ).stdout
+    lines = out.splitlines()
+    for i, line in enumerate(lines):
+        if line.split(":")[0] in ("pub", "sec"):
+            for nxt in lines[i + 1:]:
+                if nxt.startswith("fpr:"):
+                    return nxt.split(":")[9]
+    raise DefinitionError(f"no key found in {key_file}")
+
+
 def publish(
     root: Path,
     dist: Path,
@@ -86,6 +105,14 @@ def publish(
     engine: Engine = DEFAULT_ENGINE,
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> None:
+    root, dist, repo = root.resolve(), dist.resolve(), repo.resolve()
+    key_file, passphrase_file = key_file.resolve(), passphrase_file.resolve()
+    public_key = public_key.resolve()
+    if primary_fingerprint(public_key) != primary_fingerprint(key_file):
+        raise DefinitionError(
+            f"public key {public_key} does not match the signing key {key_file} "
+            "(different primary fingerprint)"
+        )
     repo.mkdir(parents=True, exist_ok=True)
     placed = place_packages(dist, repo, targets)
     new_rpms = [p.relative_to(repo).as_posix()

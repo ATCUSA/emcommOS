@@ -42,3 +42,60 @@ def test_publish_command(fake_repo, tmp_path):
     assert "NEW_RPMS=rpm/fedora-44/aarch64/x.rpm" in cmd
     assert f"{tmp_path / 'k.asc'}:/keys/signing.asc:ro,z" in cmd
     assert cmd[-3:] == ["docker.io/library/debian:13", "bash", "/emcomm/tools/container/publish.sh"]
+
+
+def test_publish_command_absolute_mounts(fake_repo, tmp_path, monkeypatch):
+    targets = load_targets(fake_repo)
+    monkeypatch.chdir(tmp_path)
+    repo = Path("rel-repo")
+    place_packages(make_dist(tmp_path), repo, targets)
+    from emcomm_build.publish import publish
+    calls = []
+    (tmp_path / "k.asc").write_text("")
+    monkeypatch.setattr("emcomm_build.publish.primary_fingerprint", lambda p: "AA")
+    publish(Path("."), Path("dist"), repo, targets, Path("k.asc"), Path("pp"),
+            Path("k.asc"), run=lambda cmd, **kw: calls.append(cmd))
+    cmd = calls[0]
+    mounts = [cmd[i + 1].split(":")[0] for i, c in enumerate(cmd) if c == "-v"]
+    assert len(mounts) == 4 and all(m.startswith("/") for m in mounts)
+
+
+def test_place_skips_existing(fake_repo, tmp_path):
+    targets = load_targets(fake_repo)
+    repo = tmp_path / "repo"
+    dist = make_dist(tmp_path)
+    place_packages(dist, repo, targets)
+    existing = repo / "deb/pool/debian-13/emcomm-a_1.0-1+deb13_amd64.deb"
+    existing.write_text("signed-original")
+    assert place_packages(dist, repo, targets) == {}
+    assert existing.read_text() == "signed-original"
+
+
+def test_public_key_mismatch(fake_repo, tmp_path):
+    import shutil
+    import subprocess
+
+    import pytest
+
+    from emcomm_build.model import DefinitionError
+    from emcomm_build.publish import publish
+    if shutil.which("gpg") is None:
+        pytest.skip("gpg not installed")
+    keys = []
+    for n in ("one", "two"):
+        home = tmp_path / f"h{n}"
+        home.mkdir(mode=0o700)
+        env = {"GNUPGHOME": str(home), "PATH": "/usr/bin:/bin"}
+        base = ["gpg", "--batch", "--passphrase", ""]
+        subprocess.run([*base, "--quick-gen-key", n, "ed25519", "sign", "never"],
+                       check=True, env=env, capture_output=True)
+        sec, pub = tmp_path / f"{n}.sec", tmp_path / f"{n}.pub"
+        sec.write_bytes(subprocess.run([*base, "--armor", "--export-secret-keys"], env=env,
+                                       check=True, capture_output=True).stdout)
+        pub.write_bytes(subprocess.run(["gpg", "--armor", "--export"], env=env,
+                                       check=True, capture_output=True).stdout)
+        keys.append((sec, pub))
+    targets = load_targets(fake_repo)
+    with pytest.raises(DefinitionError, match="does not match"):
+        publish(tmp_path, make_dist(tmp_path), tmp_path / "r", targets, keys[0][0],
+                tmp_path / "pp", keys[1][1], run=lambda *a, **k: None)
