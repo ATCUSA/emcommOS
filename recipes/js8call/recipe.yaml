@@ -1,0 +1,24 @@
+name: js8call
+kind: app
+summary: JS8Call keyboard-to-keyboard weak-signal messaging (JS8Call-improved, upstream AppImage)
+license: GPL-3.0-or-later
+homepage: https://github.com/JS8Call-improved/JS8Call-improved
+version: "3.0.3"
+release: 1
+bundle_dir: lib/js8call
+source:
+  type: arch-url
+  urls:
+    amd64: "https://github.com/JS8Call-improved/JS8Call-improved/releases/download/v{version}/JS8Call-v{version}-x86_64.AppImage"
+    arm64: "https://github.com/JS8Call-improved/JS8Call-improved/releases/download/v{version}/JS8Call-v{version}-aarch64.AppImage"
+upstream:
+  type: github-releases
+  repo: JS8Call-improved/JS8Call-improved
+  tag_pattern: 'v(\d+\.\d+\.\d+)'
+deps:
+  debian:
+    run: [libegl1, libgl1, libx11-6, libx11-xcb1, libxcb1, libdrm2, libfontconfig1, libfreetype6,
+          libharfbuzz0b, libgpg-error0, libusb-1.0-0, libwayland-client0]
+  fedora:
+    run: [libglvnd-egl, libglvnd-glx, libX11, libX11-xcb, libxcb, libdrm, fontconfig, freetype,
+          harfbuzz, libgpg-error, libusb1, libwayland-client]
