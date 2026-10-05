@@ -1,0 +1,21 @@
+name: hamlib
+kind: app
+summary: Ham radio rig control library and utilities (rigctl, rigctld)
+license: LGPL-2.1-or-later AND GPL-2.0-or-later
+homepage: https://hamlib.github.io/
+version: "4.7.2"
+release: 1
+families: [fedora]   # Debian 13 uses trixie-backports (4.7.2)
+source:
+  type: github-release-asset
+  repo: Hamlib/Hamlib
+  ref: "{version}"
+  asset: "hamlib-{version}.tar.gz"
+  sha256: ae1fcf2dbc80ea0786ea8f047b09399c3f7737d1930442f61a031708ed33e88f
+upstream:
+  type: github-releases
+  repo: Hamlib/Hamlib
+  tag_pattern: '(\d+\.\d+(?:\.\d+)?)'
+deps:
+  fedora:
+    build: [readline-devel, libusb1-devel]

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Run PROG from /opt/emcomm/bin when emcomm packages it, otherwise from the system PATH.
+# Lets one systemd unit work across distro families with different package sources.
+prog=$1
+shift
+if [ -x "/opt/emcomm/bin/$prog" ]; then
+  exec "/opt/emcomm/bin/$prog" "$@"
+fi
+exec "$prog" "$@"

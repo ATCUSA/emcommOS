@@ -1,0 +1,11 @@
+name: base
+kind: files
+summary: emcommOS environment (PATH, menus, service launcher for /opt/emcomm)
+description: >
+  Adds /opt/emcomm/bin to PATH and /opt/emcomm/share to XDG_DATA_DIRS for login
+  shells and systemd user sessions, and provides the emcomm-run launcher used by
+  emcomm's systemd user units.
+license: Apache-2.0
+version: "1.0.0"
+release: 1
+files_dir: files
