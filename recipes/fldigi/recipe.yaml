@@ -1,0 +1,21 @@
+name: fldigi
+kind: app
+summary: Fldigi digital modem program and flarq (W1HKJ)
+license: GPL-3.0-or-later
+homepage: http://www.w1hkj.org/
+version: "4.2.13"
+release: 1
+families: [debian]   # Fedora ships current fldigi
+source:
+  type: git
+  url: https://git.code.sf.net/p/fldigi/fldigi
+  ref: "v{version}"
+upstream:
+  type: git-tags
+  url: https://git.code.sf.net/p/fldigi/fldigi
+  tag_pattern: 'v(\d+\.\d+\.\d+)'
+deps:
+  debian:
+    build: [autoconf, automake, libtool, gettext, autopoint, libfltk1.3-dev, libpng-dev,
+            libsamplerate0-dev, libsndfile1-dev, portaudio19-dev, libpulse-dev, libx11-dev,
+            libxft-dev, libudev-dev, libusb-1.0-0-dev, libhamlib-dev]

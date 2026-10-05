@@ -1,0 +1,19 @@
+name: flrig
+kind: app
+summary: FLRig transceiver control program (W1HKJ)
+license: GPL-3.0-or-later
+homepage: http://www.w1hkj.org/
+version: "2.0.12"
+release: 1
+families: [debian]   # Fedora ships current flrig
+source:
+  type: git
+  url: https://git.code.sf.net/p/fldigi/flrig
+  ref: "v{version}"
+upstream:
+  type: git-tags
+  url: https://git.code.sf.net/p/fldigi/flrig
+  tag_pattern: 'v(\d+\.\d+\.\d+)'
+deps:
+  debian:
+    build: [autoconf, automake, libtool, gettext, autopoint, libfltk1.3-dev, libx11-dev, libxft-dev, libudev-dev]
