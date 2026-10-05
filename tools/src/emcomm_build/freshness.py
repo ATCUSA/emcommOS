@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,6 +19,16 @@ from .upstream import list_tags, pick_latest
 
 SUITES = ("trixie", "trixie-backports")
 FEDORA = (43, 44)
+
+
+def _safe(fn: Callable, default, source: str = "") -> object:
+    """Call fn safely, catching errors and returning default. Logs to stderr if source given."""
+    try:
+        return fn()
+    except (OSError, ValueError, KeyError, LookupError, subprocess.CalledProcessError) as exc:
+        if source:
+            print(f"warning: {source}: {exc}", file=sys.stderr)
+        return default
 
 
 def _get(url: str) -> bytes:
@@ -46,9 +57,14 @@ def debian_versions(pkg: str, *, http_text: Callable[[str], str] | None = None) 
 def fedora_version(pkg: str, release: int, *,
                    http_json: Callable[[str], dict] | None = None) -> str | None:
     url = f"https://mdapi.fedoraproject.org/f{release}/pkg/{urllib.parse.quote(pkg)}"
-    try:
-        data = http_json(url) if http_json else json.loads(_get(url))
-    except (LookupError, urllib.error.HTTPError):
+    def fetch() -> dict:
+        if http_json:
+            data = http_json(url)
+        else:
+            data = json.loads(_get(url))
+        return data
+    data = _safe(fetch, None)
+    if data is None:
         return None
     return data.get("version")
 
@@ -62,27 +78,40 @@ def report(entries: dict[str, dict], *, tags=list_tags, deb=debian_versions,
            fed=fedora_version) -> list[dict]:
     rows = []
     for name, e in entries.items():
-        try:
-            latest = pick_latest(tags(e["upstream"]), e["upstream"].tag_pattern) or "?"
-        except (urllib.error.URLError, TimeoutError, subprocess.CalledProcessError, OSError):
-            latest = "?"
+        # Upstream tags lookup
+        latest = _safe(
+            lambda e=e: pick_latest(tags(e["upstream"]), e["upstream"].tag_pattern) or "?",
+            "?",
+            source=f"{name} upstream"
+        )
         row = {"app": name, "upstream": latest}
-        dv = {}
-        if e.get("debian"):
-            try:
-                dv = deb(e["debian"])
-            except (urllib.error.URLError, TimeoutError, OSError):
-                dv = {}
+
+        # Debian versions lookup
+        dv_result = _safe(
+            lambda e=e: deb(e["debian"]) if e.get("debian") else {},
+            None,
+            source=f"{name} debian" if e.get("debian") else ""
+        )
+        dv = dv_result if dv_result is not None else {}
+        dv_failed = dv_result is None and e.get("debian")
         for suite in SUITES:
-            row[suite] = dv.get(suite, "-")
+            if dv_failed:
+                row[suite] = "?"
+            else:
+                row[suite] = dv.get(suite, "-")
+
+        # Fedora versions lookup
         for rel in FEDORA:
             v = None
             if e.get("fedora"):
-                try:
-                    v = fed(e["fedora"], rel)
-                except (urllib.error.URLError, TimeoutError, OSError):
-                    v = None
-            row[f"f{rel}"] = v or "-"
+                v = _safe(
+                    lambda e=e, rel=rel: fed(e["fedora"], rel),
+                    "?",
+                    source=f"{name} fedora-{rel}"
+                )
+            row[f"f{rel}"] = v if e.get("fedora") else "-"
+
+        # Mark rows where distro matches upstream
         for key in (*SUITES, *(f"f{r}" for r in FEDORA)):
             if row[key] == latest:
                 row[key] = f"={latest}"
