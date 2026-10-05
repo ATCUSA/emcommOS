@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
-pat version | grep -qi pat
+out=$(pat version 2>&1)
+grep -qi pat <<<"$out"
