@@ -1,0 +1,16 @@
+name: pat
+kind: app
+summary: Pat cross-platform Winlink client (upstream release binary)
+license: MIT
+homepage: https://getpat.io/
+version: "1.0.0"
+release: 1
+source:
+  type: arch-url
+  urls:
+    amd64: "https://github.com/la5nta/pat/releases/download/v{version}/pat_{version}_linux_amd64.tar.gz"
+    arm64: "https://github.com/la5nta/pat/releases/download/v{version}/pat_{version}_linux_arm64.tar.gz"
+upstream:
+  type: github-releases
+  repo: la5nta/pat
+  tag_pattern: 'v(\d+\.\d+\.\d+)'
