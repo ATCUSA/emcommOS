@@ -9,6 +9,7 @@ import urllib.error
 
 from .bump import bump, bump_order
 from .model import DefinitionError, load_recipes, load_targets, repo_root
+from .plan import build_order
 from .upstream import is_newer, list_tags, pick_latest
 
 
@@ -16,6 +17,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     root = repo_root()
     targets = load_targets(root)
     recipes = load_recipes(root)
+    build_order(recipes)
     print(f"ok: {len(targets)} targets, {len(recipes)} recipes")
     return 0
 
