@@ -6,3 +6,6 @@ build/
 *.deb
 *.rpm
 *.pkg.tar.zst
+.worktrees/
+.superpowers/
+.venv-ansible/
