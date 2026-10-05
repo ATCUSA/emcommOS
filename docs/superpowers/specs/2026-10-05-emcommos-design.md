@@ -141,7 +141,7 @@ emcommOS/
 ### 5.2 Toolsets (meta-packages)
 | Toolset | Contents |
 |---|---|
-| `emcomm-core` | hamlib/rigctld, flrig, gpsd, chrony config, emcomm-cli |
+| `emcomm-core` | hamlib/rigctld, flrig, wfview, gpsd, chrony config, emcomm-cli |
 | `emcomm-digital` | WSJT-X, JS8Call, fldigi, flmsg, flamp |
 | `emcomm-winlink` | Pat, Direwolf, ARDOP |
 | `emcomm-aprs` | Direwolf APRS configs, Xastir |
@@ -193,6 +193,10 @@ Roles:
 ### 5.5 rigctld hub & modes
 - One rigctld per active station serves `127.0.0.1:4532`. Every app uses it, so changing
   radios changes one thing. VOX-only interfaces use hamlib's dummy rig for PTT.
+- A station kit's `control` is `direct` (default: rigctld drives the radio) or `wfview`
+  (wfview owns the radio for its waterfall/LAN remote, and rigctld proxies wfview's
+  rigctld-compatible server on 4533 as NET rigctl, so apps still use 4532). wfview's server
+  binds all interfaces without authentication, so firewall TCP 4533 on untrusted networks.
 - **Modes** are exclusive quadlet sets: e.g. `ft8-js8`, `winlink-ardop`, `winlink-mercury`,
   `winlink-packet`, `aprs-digi`, `aprs-igate`, `packet-bbs`. `emcomm mode <name>` stops the
   current set and starts the new one, with readiness checks.
