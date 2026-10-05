@@ -14,6 +14,7 @@ from .build import run as run_builds
 from .bump import bump, bump_order
 from .container import engine_from_env
 from .fetch import FetchError
+from .freshness import load_entries, report
 from .model import DefinitionError, load_recipes, load_targets, repo_root
 from .plan import build_order, recipes_for_target
 from .publish import publish
@@ -122,6 +123,16 @@ def cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_freshness(args: argparse.Namespace) -> int:
+    rows = report(load_entries(repo_root()))
+    cols = ["app", "upstream", "trixie", "trixie-backports", "f43", "f44"]
+    print("  ".join(f"{c:<18}" for c in cols))
+    for row in rows:
+        print("  ".join(f"{row[c]:<18}" for c in cols))
+    print("(= means the distro already ships the latest upstream release)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="emcomm-build", description="emcommOS package builder")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -153,6 +164,8 @@ def build_parser() -> argparse.ArgumentParser:
     pub.add_argument("--passphrase-file", required=True, help="file with the key passphrase")
     pub.add_argument("--public-key", help="default keys/emcomm-archive-keyring.asc")
     pub.set_defaults(func=cmd_publish)
+    sub.add_parser("freshness", help="compare distro package versions with upstream").set_defaults(
+        func=cmd_freshness)
     return parser
 
 

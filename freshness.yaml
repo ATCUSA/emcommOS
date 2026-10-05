@@ -1,0 +1,41 @@
+# Apps to compare against distro packages. Package names are binary package names.
+apps:
+  hamlib:
+    upstream: {type: github-releases, repo: Hamlib/Hamlib, tag_pattern: '(\d+\.\d+(?:\.\d+)?)'}
+    debian: libhamlib-utils
+    fedora: hamlib
+  wsjtx:
+    upstream: {type: github-releases, repo: WSJTX/wsjtx, tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: wsjtx
+    fedora: wsjtx
+  js8call:
+    upstream: {type: github-releases, repo: JS8Call-improved/JS8Call-improved, tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: js8call
+    fedora: js8call
+  fldigi:
+    upstream: {type: git-tags, url: "https://git.code.sf.net/p/fldigi/fldigi", tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: fldigi
+    fedora: fldigi
+  flrig:
+    upstream: {type: git-tags, url: "https://git.code.sf.net/p/fldigi/flrig", tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: flrig
+    fedora: flrig
+  flmsg:
+    upstream: {type: git-tags, url: "https://git.code.sf.net/p/fldigi/flmsg", tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: flmsg
+    fedora: flmsg
+  flamp:
+    upstream: {type: git-tags, url: "https://git.code.sf.net/p/fldigi/flamp", tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: flamp
+    fedora: flamp
+  direwolf:
+    upstream: {type: git-tags, url: "https://github.com/wb2osz/direwolf", tag_pattern: '(\d+\.\d+(?:\.\d+)?)'}
+    debian: direwolf
+    fedora: direwolf
+  pat:
+    upstream: {type: github-releases, repo: la5nta/pat, tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: pat
+  wfview:
+    upstream: {type: git-tags, url: "https://gitlab.com/eliggett/wfview.git", tag_pattern: 'v(\d+\.\d+)'}
+    debian: wfview
+    fedora: wfview
