@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["targets"],
+  "properties": {
+    "targets": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["family", "format", "image", "dist_tag", "base_build_deps"],
+        "properties": {
+          "family": {"enum": ["debian", "fedora", "el", "arch"]},
+          "format": {"enum": ["deb", "rpm"]},
+          "image": {"type": "string"},
+          "dist_tag": {"type": "string", "pattern": "^[a-z0-9]+$"},
+          "base_build_deps": {"type": "array", "items": {"type": "string"}},
+          "extra_repos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "deb822", "pin_packages", "pin_priority"],
+              "properties": {
+                "name": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+                "deb822": {"type": "string"},
+                "pin_packages": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                "pin_priority": {"type": "integer"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+# Build targets. `family` selects package-manager logic, `dist_tag` is appended to the
+# package release (1+deb13 / 1.fc44) so identical versions never collide across distros.
+targets:
+  debian-13:
+    family: debian
+    format: deb
+    image: docker.io/library/debian:13
+    dist_tag: deb13
+    base_build_deps: [build-essential, ca-certificates, pkg-config, git, file]
+    # Official backports carry current hamlib/WSJT-X/Direwolf. The pin limits backports to
+    # exactly these packages; keep in sync with roles/base/vars/Debian.yml (tested).
+    extra_repos:
+      - name: backports
+        deb822: |
+          Types: deb
+          URIs: http://deb.debian.org/debian
+          Suites: trixie-backports
+          Components: main
+          Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+        pin_packages: ["libhamlib*", "wsjtx*", "direwolf"]
+        pin_priority: 500
+  fedora-44:
+    family: fedora
+    format: rpm
+    image: registry.fedoraproject.org/fedora:44
+    dist_tag: fc44
+    base_build_deps: [gcc, gcc-c++, make, pkgconf-pkg-config, git, file, findutils, which, tar, gzip]
+  fedora-43:
+    family: fedora
+    format: rpm
+    image: registry.fedoraproject.org/fedora:43
+    dist_tag: fc43
+    base_build_deps: [gcc, gcc-c++, make, pkgconf-pkg-config, git, file, findutils, which, tar, gzip]

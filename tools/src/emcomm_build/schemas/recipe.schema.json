@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "kind", "summary", "license", "version", "release"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "kind": {"enum": ["app", "meta", "files"]},
+    "summary": {"type": "string", "minLength": 1},
+    "description": {"type": "string"},
+    "license": {"type": "string", "minLength": 1},
+    "homepage": {"type": "string"},
+    "version": {"type": "string", "pattern": "^[0-9][0-9A-Za-z.]*$"},
+    "release": {"type": "integer", "minimum": 1},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {"enum": ["github-release-asset", "git", "local", "arch-url", "none"]},
+        "urls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["amd64", "arm64"],
+          "properties": {
+            "amd64": {"type": "string", "pattern": "^https://"},
+            "arm64": {"type": "string", "pattern": "^https://"}
+          }
+        },
+        "repo": {"type": "string"},
+        "asset": {"type": "string"},
+        "url": {"type": "string", "pattern": "^https://"},
+        "ref": {"type": "string"},
+        "paths": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"const": "github-release-asset"}}},
+         "then": {"required": ["repo", "asset", "sha256"]}},
+        {"if": {"properties": {"type": {"const": "git"}}},
+         "then": {"required": ["url", "ref"]}},
+        {"if": {"properties": {"type": {"const": "local"}}},
+         "then": {"required": ["paths"]}},
+        {"if": {"properties": {"type": {"const": "arch-url"}}},
+         "then": {"required": ["urls"]}}
+      ]
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tag_pattern"],
+      "properties": {
+        "type": {"enum": ["github-releases", "git-tags"]},
+        "repo": {"type": "string"},
+        "url": {"type": "string", "pattern": "^https://"},
+        "tag_pattern": {"type": "string"}
+      }
+    },
+    "depends_on": {"type": "array", "items": {"type": "string"}},
+    "requires": {"type": "array", "items": {"type": "string"}},
+    "deps": {
+      "type": "object",
+      "propertyNames": {"enum": ["debian", "fedora", "el", "arch"]},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "build": {"type": "array", "items": {"type": "string"}},
+          "run": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "files_dir": {"type": "string"},
+    "families": {
+      "type": "array",
+      "items": {"enum": ["debian", "fedora", "el", "arch"]},
+      "minItems": 1
+    },
+    "bundle_dir": {"type": "string", "pattern": "^lib/[a-z0-9-]+$"}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "app"}}}, "then": {"required": ["source"]}},
+    {"if": {"properties": {"kind": {"const": "files"}}}, "then": {"required": ["files_dir"]}}
+  ]
+}
