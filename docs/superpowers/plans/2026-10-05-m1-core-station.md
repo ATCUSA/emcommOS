@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build, sign, and publish the core emcomm packages (hamlib, flrig, fldigi/flmsg/flamp, WSJT-X, JS8Call, Direwolf, Pat, wfview, the `emcomm` CLI, and toolset metapackages) for Debian 13 and Fedora 44/43 on amd64 and arm64. Then provision laptops from them with Ansible, and render each app's config from operator and station profiles.
+**Goal:** Deliver the standalone core station for Debian 13 and Fedora 43/44 (amd64 + arm64). That is a signed package repo combining version-floored distro packages, repackaged upstream binaries (Pat, JS8Call), and our own builds (hamlib on Fedora, fldigi/flrig on Debian, wfview, the `emcomm` CLI, and toolset metapackages). Any machine, including a volunteer's own laptop, can be set up from it (with consent, and fully uninstallable), and each app's config is rendered from operator and station profiles for USB or LAN (wfview) station kits.
 
-**Architecture:** A Python build tool (`tools/`, `emcomm-build`) reads one `recipe.yaml` per app. It builds the app inside a clean per-distro Podman container into `/opt/emcomm` with rpath, packages the result with nFPM, smoke-tests it in a fresh container, and publishes a signed static apt/dnf repo to Cloudflare R2. A second Python package (`cli/`, `emcomm`) manages operator and station profiles, generates udev rules, and renders managed keys into app configs. An Ansible collection (`emcomm.station`) configures the repo, groups, toolsets, and systemd user units, and `bootstrap.sh` ties it all together.
+**Architecture:** Each package's source is declared per distro family (spec §4.1): distro package (with Debian `trixie-backports` pinned for named packages), upstream prebuilt binary, or source build. A Python build tool (`tools/`, `emcomm-build`) reads one `recipe.yaml` per package that we produce. It builds or unpacks that package in a clean per-distro Podman container into `/opt/emcomm`, packages it with nFPM, smoke-tests it in a fresh container, and publishes a signed static apt/dnf repo to Cloudflare R2. Metapackages tie our packages to version-floored distro packages. A second Python package (`cli/`, `emcomm`) manages operator and station profiles, generates udev rules, and renders managed keys into app configs. An Ansible collection (`emcomm.station`) configures the repo, groups, toolsets, and systemd user units, and `bootstrap.sh` ties it all together.
 
 **Tech Stack:** Python ≥3.12 (pyyaml, jsonschema, tomli-w), uv, pytest, ruff, Podman, nFPM 2.41.1, apt-ftparchive, createrepo_c, rpmsign, GnuPG, Ansible-core ≥2.16 with Molecule (podman driver), GitHub Actions (native `ubuntu-24.04` and `ubuntu-24.04-arm` runners), rclone → Cloudflare R2.
 
@@ -13,46 +13,50 @@
 ## Global Constraints
 
 - License Apache-2.0. Copy no code or data from EmComm Tools or 73Linux; write radio definitions from manufacturer and hamlib facts.
-- Everything installs under `/opt/emcomm` (`libdir=/opt/emcomm/lib`, rpath `/opt/emcomm/lib`). Outside it, packages may only add `/etc/profile.d/emcomm.sh` and `/usr/lib/environment.d/50-emcomm.conf` (from `emcomm-base`).
+- Sourcing order per family: distro package if current enough → upstream prebuilt binary (sha256-pinned) → source build. Decisions are recorded in recipes/metapackages and reviewed with `emcomm-build freshness`.
+- Everything we package installs under `/opt/emcomm` (`libdir=/opt/emcomm/lib`, rpath `/opt/emcomm/lib`). Outside it, packages may only add `/etc/profile.d/emcomm.sh` and `/usr/lib/environment.d/50-emcomm.conf` (from `emcomm-base`).
+- BYOD: never change a machine without showing the change and getting confirmation (`--yes` for unattended). Everything must be removable with `bootstrap.sh --uninstall` / `emcomm uninstall`. Standalone installs collect no data.
 - Package name is `emcomm-<recipe name>`. Every package except `emcomm-base` depends on `emcomm-base`.
 - M1 targets are `debian-13`, `fedora-44`, `fedora-43` × `amd64`, `arm64`. The only channel is `testing`.
 - Recipe versions are the latest upstream release *tags*. Release candidates are excluded, and versions in YAML are always quoted strings.
-- hamlib ≥ 4.7.2 (rigctld CVE fixes). rigctld only ever listens on `127.0.0.1:4532`.
+- rigctld from hamlib ≥ 4.7.2 (Debian: backports; Fedora: our build), for the CVE fixes and IC-7300MK2 model 3094. rigctld only ever listens on `127.0.0.1:4532`. Apps reach radios only through this hub, so distro apps may link older hamlib.
 - The repository URL comes from configuration (`EMCOMM_REPO_URL` / the `emcomm_repo_url` variable / the GitHub variable `EMCOMM_REPO_URL`). Never hardcode a domain.
 - In M1, emcomm never writes operator secrets (Winlink password, APRS-IS passcode).
 - App configs get **managed keys only**. `~/.config/emcomm/direwolf.conf` and `~/.config/emcomm/rigctld.env` are fully owned by emcomm.
 - Signing uses the dedicated project key (Task 1). Only its signing subkey goes to CI.
 
 **M1 scoping notes:**
-1. In M1, rigctld, Direwolf, and Pat run as plain systemd *user* units using the native `/opt/emcomm` binaries. Container images and Quadlets arrive with "modes" in M2.
-2. Ubuntu, EL10, and Arch targets arrive in M2.
+1. Containers are used only for clean build/test environments. rigctld, Direwolf, and Pat run as plain systemd *user* units through `emcomm-run`, which uses distro or `/opt/emcomm` binaries.
+2. Ubuntu 24.04, EL10, Arch (official repos + AUR), group profiles, and the Nix tier-2 path arrive in M2. The managed level (push, machine roles, quirks, inventory) comes later.
 
 ---
 
 ## File Structure
 
 ```
-targets.yaml                         # build targets (distro containers, dist tags)
+targets.yaml                         # build targets (containers, dist tags, Debian backports pin)
+freshness.yaml                       # distro-vs-upstream report inputs (Task 14)
+flake.nix, flake.lock                # pinned dev shell (Task 29)
 keys/emcomm-archive-keyring.asc      # project public key (Task 1)
 keys/fingerprint.txt
 bootstrap.sh                         # repo + CLI install, then `emcomm bootstrap`
 docs/maintainer/setup.md             # key, R2, GitHub secrets (Task 1)
-docs/testing/m1-manual-checks.md     # hardware checks (Task 26)
+docs/testing/m1-manual-checks.md     # hardware checks (Task 27)
 tools/                               # emcomm-build (Python)
   pyproject.toml
-  src/emcomm_build/{model,net,upstream,bump,plan,fetch,container,package,build,publish,cli}.py
+  src/emcomm_build/{model,net,upstream,bump,plan,fetch,container,package,build,publish,freshness,cli}.py
   src/emcomm_build/schemas/{recipe,targets}.schema.json
   tests/...
-tools/container/{build,runtime-deps,smoke,publish}.sh   # run inside distro containers
-recipes/<name>/{recipe.yaml,build.sh,smoke.sh}          # base, hamlib, flrig, fldigi, flmsg, flamp,
-                                                        # wsjtx, js8call, direwolf, pat, wfview, cli,
-                                                        # core, digital, winlink, standard
+tools/container/{build,repos,runtime-deps,smoke,publish}.sh   # run inside distro containers
+recipes/<name>/{recipe.yaml,build.sh,smoke.sh[,SHA256SUMS]}
+                                     # base, hamlib (fedora), fldigi + flrig (debian), js8call +
+                                     # pat (prebuilt), wfview, cli, core, digital, winlink, standard
 radios/<id>.yaml                     # radio definitions
 cli/                                 # emcomm CLI (Python)
   pyproject.toml
   src/emcomm/{paths,models,validation,profiles,radios,detect,udev,apply,cli}.py
-  src/emcomm/render/{context,ini,xml,qtini,fldigi,pat,direwolf,rigctld}.py
-  src/emcomm/commands/{operator,radios,station,use,status,bootstrap}.py
+  src/emcomm/render/{context,ini,xml,qtini,fldigi,pat,direwolf,rigctld,wfview,pipewire}.py
+  src/emcomm/commands/{operator,radios,station,use,status,bootstrap,uninstall}.py
   src/emcomm/schemas/{operator,station,radio}.schema.json
   tests/...
 ansible/ansible_collections/emcomm/station/
@@ -167,11 +171,11 @@ git commit -m "docs: maintainer setup; add project signing public key"
 **Interfaces:**
 - Produces in `emcomm_build.model`:
   - `DefinitionError(Exception)`, `ARCHES = ("amd64", "arm64")`, `RPM_ARCH = {"amd64": "x86_64", "arm64": "aarch64"}`
-  - `Target(name, family, format, image, dist_tag, base_build_deps: tuple[str, ...])`
-  - `Source(type, repo=None, asset=None, url=None, ref=None, paths=(), sha256=None)` with `.resolved_ref(version) -> str`
+  - `ExtraRepo(name, deb822, pin_packages, pin_priority)` and `Target(name, family, format, image, dist_tag, base_build_deps, extra_repos=())`
+  - `Source(type, repo=None, asset=None, url=None, ref=None, paths=(), sha256=None, urls=())` with `.resolved_ref(version) -> str` and `.url_for(arch, version) -> str`. An `arch-url` source is an upstream prebuilt artifact per architecture; its checksums live in a `SHA256SUMS` sidecar next to `recipe.yaml`.
   - `Upstream(type, tag_pattern, repo=None, url=None)`
   - `FamilyDeps(build=(), run=())`
-  - `Recipe(name, kind, summary, license, version, release, dir, description="", homepage="", source=Source("none"), upstream=None, depends_on=(), requires=(), deps={}, files_dir=None)` with `.package -> "emcomm-<name>"` and `.deps_for(family) -> FamilyDeps`
+  - `Recipe(name, kind, summary, license, version, release, dir, description="", homepage="", source=Source("none"), upstream=None, depends_on=(), requires=(), deps={}, files_dir=None, families=(), bundle_dir=None)` with `.package -> "emcomm-<name>"`, `.deps_for(family) -> FamilyDeps`, and `.applies_to(family) -> bool`. `families` limits where a recipe is built (e.g. hamlib only for fedora, because Debian uses backports).
   - `repo_root(start=None) -> Path`, `load_targets(root) -> dict[str, Target]`, `load_recipe(dir) -> Recipe`, `load_recipes(root) -> dict[str, Recipe]`
 - Produces in `emcomm_build.cli`: `main(argv=None) -> int`, `build_parser() -> ArgumentParser`. Commands register through `sub.add_parser(...).set_defaults(func=handler)`, where each handler is `(args) -> int`.
 
@@ -224,6 +228,18 @@ targets:
     image: docker.io/library/debian:13
     dist_tag: deb13
     base_build_deps: [build-essential, ca-certificates, pkg-config, git, file]
+    # Official backports carry current hamlib/WSJT-X/Direwolf. The pin limits backports to
+    # exactly these packages; keep in sync with roles/base/vars/Debian.yml (tested).
+    extra_repos:
+      - name: backports
+        deb822: |
+          Types: deb
+          URIs: http://deb.debian.org/debian
+          Suites: trixie-backports
+          Components: main
+          Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+        pin_packages: ["libhamlib*", "wsjtx*", "direwolf"]
+        pin_priority: 500
   fedora-44:
     family: fedora
     format: rpm
@@ -263,7 +279,21 @@ Append `public/` to `.gitignore`.
           "format": {"enum": ["deb", "rpm"]},
           "image": {"type": "string"},
           "dist_tag": {"type": "string", "pattern": "^[a-z0-9]+$"},
-          "base_build_deps": {"type": "array", "items": {"type": "string"}}
+          "base_build_deps": {"type": "array", "items": {"type": "string"}},
+          "extra_repos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "deb822", "pin_packages", "pin_priority"],
+              "properties": {
+                "name": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+                "deb822": {"type": "string"},
+                "pin_packages": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                "pin_priority": {"type": "integer"}
+              }
+            }
+          }
         }
       }
     }
@@ -293,7 +323,16 @@ Append `public/` to `.gitignore`.
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": {"enum": ["github-release-asset", "git", "local", "none"]},
+        "type": {"enum": ["github-release-asset", "git", "local", "arch-url", "none"]},
+        "urls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["amd64", "arm64"],
+          "properties": {
+            "amd64": {"type": "string", "pattern": "^https://"},
+            "arm64": {"type": "string", "pattern": "^https://"}
+          }
+        },
         "repo": {"type": "string"},
         "asset": {"type": "string"},
         "url": {"type": "string", "pattern": "^https://"},
@@ -307,7 +346,9 @@ Append `public/` to `.gitignore`.
         {"if": {"properties": {"type": {"const": "git"}}},
          "then": {"required": ["url", "ref"]}},
         {"if": {"properties": {"type": {"const": "local"}}},
-         "then": {"required": ["paths"]}}
+         "then": {"required": ["paths"]}},
+        {"if": {"properties": {"type": {"const": "arch-url"}}},
+         "then": {"required": ["urls"]}}
       ]
     },
     "upstream": {
@@ -335,7 +376,13 @@ Append `public/` to `.gitignore`.
         }
       }
     },
-    "files_dir": {"type": "string"}
+    "files_dir": {"type": "string"},
+    "families": {
+      "type": "array",
+      "items": {"enum": ["debian", "fedora", "el", "arch"]},
+      "minItems": 1
+    },
+    "bundle_dir": {"type": "string", "pattern": "^lib/[a-z0-9-]+$"}
   },
   "allOf": [
     {"if": {"properties": {"kind": {"const": "app"}}}, "then": {"required": ["source"]}},
@@ -393,7 +440,7 @@ def app(name: str, version: str = "1.0", depends_on: str = "[]", release: int = 
     source:
       type: none
     depends_on: {depends_on}
-    """
+"""  # no trailing indent, so callers can append 4-space-indented YAML lines
 
 
 @pytest.fixture
@@ -474,6 +521,28 @@ def test_repo_root_walks_up(tmp_path, monkeypatch):
     assert repo_root(nested) == tmp_path
 
 
+def test_families_and_arch_url(fake_repo):
+    d = write_recipe(fake_repo, "pat", app("pat").replace(
+        "type: none",
+        'type: arch-url\n      urls:\n        amd64: "https://x/pat_{version}_amd64.tgz"\n'
+        '        arm64: "https://x/pat_{version}_arm64.tgz"') + "    families: [fedora]\n")
+    with pytest.raises(DefinitionError, match="SHA256SUMS"):
+        load_recipes(fake_repo)
+    (d / "SHA256SUMS").write_text("")
+    r = load_recipes(fake_repo)["pat"]
+    assert r.source.url_for("arm64", "1.0") == "https://x/pat_1.0_arm64.tgz"
+    assert r.applies_to("fedora") and not r.applies_to("debian")
+
+
+def test_target_extra_repos(tmp_path):
+    (tmp_path / "targets.yaml").write_text(
+        "targets:\n  debian-13:\n    family: debian\n    format: deb\n    image: i\n"
+        "    dist_tag: deb13\n    base_build_deps: []\n    extra_repos:\n"
+        "      - {name: backports, deb822: 'Types: deb', pin_packages: [wsjtx], pin_priority: 500}\n")
+    repo = load_targets(tmp_path)["debian-13"].extra_repos[0]
+    assert (repo.name, repo.pin_packages, repo.pin_priority) == ("backports", ("wsjtx",), 500)
+
+
 def test_validate_command(fake_repo, capsys):
     write_recipe(fake_repo, "hamlib", app("hamlib"))
     assert main(["validate"]) == 0
@@ -517,6 +586,14 @@ class DefinitionError(Exception):
 
 
 @dataclass(frozen=True)
+class ExtraRepo:
+    name: str
+    deb822: str
+    pin_packages: tuple[str, ...]
+    pin_priority: int
+
+
+@dataclass(frozen=True)
 class Target:
     name: str
     family: str
@@ -524,6 +601,7 @@ class Target:
     image: str
     dist_tag: str
     base_build_deps: tuple[str, ...]
+    extra_repos: tuple[ExtraRepo, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -535,9 +613,13 @@ class Source:
     ref: str | None = None
     paths: tuple[str, ...] = ()
     sha256: str | None = None
+    urls: tuple[tuple[str, str], ...] = ()  # (arch, url template) for arch-url sources
 
     def resolved_ref(self, version: str) -> str:
         return (self.ref or "{version}").format(version=version)
+
+    def url_for(self, arch: str, version: str) -> str:
+        return dict(self.urls)[arch].format(version=version)
 
 
 @dataclass(frozen=True)
@@ -571,10 +653,15 @@ class Recipe:
     requires: tuple[str, ...] = ()
     deps: dict[str, FamilyDeps] = field(default_factory=dict)
     files_dir: str | None = None
+    families: tuple[str, ...] = ()  # empty = every family
+    bundle_dir: str | None = None   # self-contained tree (e.g. extracted AppImage) under /opt/emcomm
 
     @property
     def package(self) -> str:
         return f"emcomm-{self.name}"
+
+    def applies_to(self, family: str) -> bool:
+        return not self.families or family in self.families
 
     def deps_for(self, family: str) -> FamilyDeps:
         return self.deps.get(family, FamilyDeps())
@@ -615,6 +702,11 @@ def load_targets(root: Path) -> dict[str, Target]:
             image=t["image"],
             dist_tag=t["dist_tag"],
             base_build_deps=tuple(t["base_build_deps"]),
+            extra_repos=tuple(
+                ExtraRepo(name=r["name"], deb822=r["deb822"],
+                          pin_packages=tuple(r["pin_packages"]), pin_priority=r["pin_priority"])
+                for r in t.get("extra_repos", [])
+            ),
         )
         for name, t in data["targets"].items()
     }
@@ -648,6 +740,7 @@ def load_recipe(recipe_dir: Path) -> Recipe:
             ref=src.get("ref"),
             paths=tuple(src.get("paths", ())),
             sha256=src.get("sha256"),
+            urls=tuple(sorted(src.get("urls", {}).items())),
         ),
         upstream=Upstream(
             type=up["type"], tag_pattern=up["tag_pattern"], repo=up.get("repo"), url=up.get("url")
@@ -661,9 +754,16 @@ def load_recipe(recipe_dir: Path) -> Recipe:
             for fam, d in data.get("deps", {}).items()
         },
         files_dir=data.get("files_dir"),
+        families=tuple(data.get("families", ())),
+        bundle_dir=data.get("bundle_dir"),
     )
     if recipe.kind == "app" and not (recipe_dir / "build.sh").is_file():
         raise DefinitionError(f"{path}: app recipes need a build.sh next to recipe.yaml")
+    if recipe.source.type == "arch-url" and not (recipe_dir / "SHA256SUMS").is_file():
+        raise DefinitionError(
+            f"{path}: arch-url sources need SHA256SUMS; run `emcomm-build bump {recipe.name} "
+            f"{recipe.version}`"
+        )
     return recipe
 
 
@@ -756,7 +856,7 @@ git commit -m "feat(build): recipe/target model, schemas and validate command"
   - `upstream.is_newer(a, b) -> bool`
   - `upstream.list_tags(up, *, http_json=..., run=...) -> list[str]`
   - `bump.set_version(path, version, sha256)`, `bump.increment_release(path)`, `bump.dependents(recipes, name) -> list[str]`
-  - `bump.bump(root, name, version, *, sha_for=net.download_sha256) -> list[str]` (the bumped name followed by its bumped dependents)
+  - `bump.bump(root, name, version, *, sha_for=net.download_sha256) -> list[str]` (the bumped name followed by its bumped dependents). For `arch-url` sources it rewrites `recipes/<name>/SHA256SUMS` (`<sha256>  <basename>` per architecture).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -867,6 +967,21 @@ def test_dependents_are_transitive(fake_repo):
     write_recipe(fake_repo, "extra", app("extra", depends_on="[wsjtx]"))
     write_recipe(fake_repo, "pat", app("pat"))
     assert dependents(load_recipes(fake_repo), "hamlib") == ["extra", "wsjtx"]
+
+
+def test_bump_arch_url_writes_sidecar(fake_repo):
+    d = fake_repo / "recipes" / "pat"
+    d.mkdir(parents=True)
+    (d / "build.sh").write_text("")
+    (d / "recipe.yaml").write_text(
+        'name: pat\nkind: app\nsummary: pat\nlicense: MIT\nversion: "0.9.0"\nrelease: 2\n'
+        "source:\n  type: arch-url\n  urls:\n"
+        '    amd64: "https://x/pat_{version}_linux_amd64.tar.gz"\n'
+        '    arm64: "https://x/pat_{version}_linux_arm64.tar.gz"\n')
+    assert bump(fake_repo, "pat", "1.0.0", sha_for=lambda url: ("a" if "amd64" in url else "b") * 64) == ["pat"]
+    assert (d / "SHA256SUMS").read_text() == (
+        "a" * 64 + "  pat_1.0.0_linux_amd64.tar.gz\n" + "b" * 64 + "  pat_1.0.0_linux_arm64.tar.gz\n")
+    assert 'version: "1.0.0"' in (d / "recipe.yaml").read_text()
 
 
 def test_bump_resets_release_and_increments_dependents(fake_repo):
@@ -1066,6 +1181,12 @@ def bump(
     sha = None
     if src.get("type") == "github-release-asset":
         sha = sha_for(asset_url(src["repo"], src.get("ref", "{version}"), src["asset"], version))
+    elif src.get("type") == "arch-url":
+        lines = []
+        for arch in sorted(src["urls"]):
+            url = src["urls"][arch].format(version=version)
+            lines.append(f"{sha_for(url)}  {url.rsplit('/', 1)[-1]}")
+        (path.parent / "SHA256SUMS").write_text("\n".join(lines) + "\n")
     set_version(path, version, sha)
     deps = dependents(load_recipes(root), name)
     for dep in deps:
@@ -1148,6 +1269,7 @@ git commit -m "feat(build): upstream tag checks and recipe bumping"
 - Produces:
   - `build_order(recipes) -> list[str]`. A topological order over `depends_on`, `requires`, and an implicit dependency on `base`; ties break deterministically. A cycle raises `DefinitionError`.
   - `closure(recipes, names) -> set[str]`: the names, everything they transitively depend on or require, and `base` if that recipe exists.
+  - `recipes_for_target(recipes, target) -> dict[str, Recipe]`: only the recipes that apply to the target's family. Their `depends_on`/`requires` edges to excluded recipes are dropped; for example, `core` requires `hamlib`, which only exists on Fedora. Every later step works on this filtered dict.
   - `full_release(recipe, target) -> str`: `"1+deb13"` for deb, `"1.fc44"` for rpm.
   - `package_filename(recipe, target, arch) -> str`
   - `repo_path(target, arch, filename) -> str`: `deb/pool/<target>/<file>` or `rpm/<target>/<x86_64|aarch64>/<file>`.
@@ -1170,6 +1292,7 @@ import pytest
 from emcomm_build.model import DefinitionError, load_recipes, load_targets
 from emcomm_build.plan import (
     build_order, closure, fetch_manifest, full_release, package_filename, plan_builds,
+    recipes_for_target,
     published_files, repo_path,
 )
 
@@ -1197,6 +1320,16 @@ def test_cycle_is_reported(fake_repo):
     write_recipe(fake_repo, "b", app("b", depends_on="[a]"))
     with pytest.raises(DefinitionError, match="cycle"):
         build_order(load_recipes(fake_repo))
+
+
+def test_recipes_for_target_filters_families(fake_repo):
+    write_recipe(fake_repo, "hamlib", app("hamlib") + "    families: [fedora]\n")
+    write_recipe(fake_repo, "core", app("core", depends_on="[hamlib]"))
+    recipes, targets = load_recipes(fake_repo), load_targets(fake_repo)
+    deb = recipes_for_target(recipes, targets["debian-13"])
+    assert set(deb) == {"core"} and deb["core"].depends_on == ()
+    fed = recipes_for_target(recipes, targets["fedora-44"])
+    assert fed["core"].depends_on == ("hamlib",)
 
 
 def test_closure_includes_base(stack):
@@ -1275,6 +1408,7 @@ import json
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from graphlib import CycleError, TopologicalSorter
 
 from .model import RPM_ARCH, DefinitionError, Recipe, Target
@@ -1302,6 +1436,16 @@ def build_order(recipes: dict[str, Recipe]) -> list[str]:
         order.extend(ready)
         ts.done(*ready)
     return order
+
+
+def recipes_for_target(recipes: dict[str, Recipe], target: Target) -> dict[str, Recipe]:
+    keep = {n for n, r in recipes.items() if r.applies_to(target.family)}
+    return {
+        n: replace(r, depends_on=tuple(d for d in r.depends_on if d in keep),
+                   requires=tuple(d for d in r.requires if d in keep))
+        for n, r in recipes.items()
+        if n in keep
+    }
 
 
 def closure(recipes: dict[str, Recipe], names: Iterable[str]) -> set[str]:
@@ -1409,8 +1553,9 @@ git commit -m "feat(build): build ordering, package naming and build planning"
 - Produces:
   - `FetchError(Exception)`
   - `extract_tarball(archive: Path, dest: Path) -> None`: strips a single top-level directory.
-  - `fetch_source(recipe, workdir, root, cache, *, download_fn=download, run=subprocess.run) -> Path`: returns `workdir/"src"`.
-    - `local` sources copy each path to `src/<basename>`.
+  - `fetch_source(recipe, workdir, root, cache, *, arch=None, download_fn=download, run=subprocess.run) -> Path`: returns `workdir/"src"`.
+    - `local` sources copy each path (directory or file) to `src/<basename>`.
+    - `arch-url` sources download the artifact for `arch`, verify it against the recipe's `SHA256SUMS` sidecar, and place it unextracted in `src/`, where the recipe's `build.sh` unpacks it.
     - `git` sources do a shallow clone of the resolved ref.
     - `github-release-asset` sources download into `cache`, verify the sha256, and extract.
     - `none` creates an empty `src`.
@@ -1496,6 +1641,30 @@ def test_local_copies_paths(tmp_path):
     assert not (out / "cli" / "__pycache__").exists()
 
 
+def test_arch_url_verifies_sidecar(tmp_path):
+    rdir = tmp_path / "recipe"
+    rdir.mkdir()
+    payload = tmp_path / "payload"
+    payload.write_bytes(b"binary")
+    sha = hashlib.sha256(b"binary").hexdigest()
+    (rdir / "SHA256SUMS").write_text(f"{sha}  pat_1.2.3_arm64.tgz\n")
+    src = Source(type="arch-url", urls=(("amd64", "https://x/pat_{version}_amd64.tgz"),
+                                         ("arm64", "https://x/pat_{version}_arm64.tgz")))
+    r = Recipe(name="pat", kind="app", summary="s", license="MIT", version="1.2.3", release=1,
+               dir=rdir, source=src)
+
+    def fake_download(url, dest):
+        shutil.copy(payload, dest)
+        return sha
+
+    out = fetch_source(r, tmp_path / "w", tmp_path, tmp_path / "c", arch="arm64",
+                       download_fn=fake_download)
+    assert (out / "pat_1.2.3_arm64.tgz").read_bytes() == b"binary"
+    with pytest.raises(FetchError, match="missing from SHA256SUMS"):
+        fetch_source(r, tmp_path / "w", tmp_path, tmp_path / "c", arch="amd64",
+                     download_fn=fake_download)
+
+
 def test_git_clone_at_tag(tmp_path):
     origin = tmp_path / "origin"
     origin.mkdir()
@@ -1556,12 +1725,22 @@ def extract_tarball(archive: Path, dest: Path) -> None:
                 shutil.move(str(entry), dest / entry.name)
 
 
+def _sidecar_sums(recipe_dir: Path) -> dict[str, str]:
+    sums = {}
+    for line in (recipe_dir / "SHA256SUMS").read_text().splitlines():
+        if line.strip():
+            sha, name = line.split(maxsplit=1)
+            sums[name.strip()] = sha
+    return sums
+
+
 def fetch_source(
     recipe: Recipe,
     workdir: Path,
     root: Path,
     cache: Path,
     *,
+    arch: str | None = None,
     download_fn: Callable[[str, Path], str] = download,
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> Path:
@@ -1576,7 +1755,27 @@ def fetch_source(
     elif s.type == "local":
         src.mkdir()
         for p in s.paths:
-            shutil.copytree(root / p, src / Path(p).name, ignore=IGNORE)
+            if (root / p).is_dir():
+                shutil.copytree(root / p, src / Path(p).name, ignore=IGNORE)
+            else:
+                shutil.copy2(root / p, src / Path(p).name)
+    elif s.type == "arch-url":
+        if arch is None:
+            raise FetchError(f"{recipe.name}: arch-url sources need the target architecture")
+        url = s.url_for(arch, recipe.version)
+        name = url.rsplit("/", 1)[-1]
+        expected = _sidecar_sums(recipe.dir).get(name)
+        if expected is None:
+            raise FetchError(f"{recipe.name}: {name} missing from SHA256SUMS; run emcomm-build bump")
+        cached = cache / f"{recipe.name}-{name}"
+        got = sha256_file(cached) if cached.exists() else None
+        if got != expected:
+            got = download_fn(url, cached)
+        if got != expected:
+            cached.unlink(missing_ok=True)
+            raise FetchError(f"{recipe.name}: sha256 mismatch for {url}: expected {expected}, got {got}")
+        src.mkdir()
+        shutil.copy2(cached, src / name)  # build.sh unpacks/installs the upstream artifact
     elif s.type == "git":
         run(["git", "clone", "--quiet", "--depth", "1", "--branch",
              s.resolved_ref(recipe.version), s.url, str(src)], check=True)
@@ -1615,7 +1814,7 @@ git commit -m "feat(build): fetch recipe sources (asset, git, local)"
 
 **Files:**
 - Create: `tools/src/emcomm_build/container.py`
-- Create: `tools/container/build.sh`, `tools/container/runtime-deps.sh`
+- Create: `tools/container/build.sh`, `tools/container/runtime-deps.sh`, `tools/container/repos.sh`
 - Test: `tools/tests/test_container.py`, `tools/tests/integration/test_container_build.py`, `tools/tests/integration/__init__.py` (empty)
 
 **Interfaces:**
@@ -1625,6 +1824,7 @@ git commit -m "feat(build): fetch recipe sources (asset, git, local)"
   - `build_deps(recipe, target) -> list[str]`
   - `build_command(engine, recipe, target, root, workdir) -> list[str]`
   - `run_build(engine, recipe, target, root, workdir, *, run=subprocess.run) -> tuple[Path, list[str]]`: returns the destdir and the runtime package dependencies that were auto-detected from the ELF files.
+  - `pin_text(repo: ExtraRepo) -> str` and `write_repo_files(target, dest: Path) -> None`. For each extra repo these write `<name>.sources` (deb822) and `<name>.pref` (apt pin limited to `pin_packages`). `tools/container/repos.sh` installs them inside build and smoke containers, and the Ansible base role writes the same content on real machines.
 - Container contract (used by every recipe `build.sh`):
   - The repo is mounted read-only at `/emcomm`, and `/work` holds `src/`, `deps/`, and `destdir/`.
   - `build.sh` runs with cwd `$SRC` and these variables: `PREFIX=/opt/emcomm`, `DESTDIR=/work/destdir`, `SRC=/work/src`, `JOBS`, `VERSION`, `PKG_CONFIG_PATH=/opt/emcomm/lib/pkgconfig`, `CMAKE_PREFIX_PATH=/opt/emcomm`, and `LDFLAGS` containing `-Wl,-rpath,/opt/emcomm/lib`.
@@ -1662,6 +1862,18 @@ def test_build_command(tmp_path):
     assert cmd[-3:] == ["docker.io/library/debian:13", "bash", "/emcomm/tools/container/build.sh"]
 
 
+def test_pin_and_repo_files(tmp_path):
+    from emcomm_build.container import pin_text, write_repo_files
+    from emcomm_build.model import ExtraRepo
+    repo = ExtraRepo("backports", "Types: deb\nSuites: trixie-backports\n", ("wsjtx*", "direwolf"), 500)
+    assert pin_text(repo) == ("Package: wsjtx* direwolf\nPin: release n=trixie-backports\n"
+                              "Pin-Priority: 500\n")
+    target = Target("debian-13", "debian", "deb", "img", "deb13", (), (repo,))
+    write_repo_files(target, tmp_path / "repos")
+    assert sorted(p.name for p in (tmp_path / "repos").iterdir()) == ["backports.pref",
+                                                                     "backports.sources"]
+
+
 def test_run_build_reads_runtime_deps(tmp_path):
     def fake_run(cmd, check):
         (tmp_path / "runtime-deps.txt").write_text("libc6\nlibusb-1.0-0\n\n")
@@ -1692,7 +1904,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .model import Recipe, Target
+from .model import ExtraRepo, Recipe, Target
 
 
 @dataclass(frozen=True)
@@ -1723,6 +1935,23 @@ def build_command(
     ]
 
 
+def pin_text(repo: ExtraRepo) -> str:
+    suite = next(line.split(":", 1)[1].strip() for line in repo.deb822.splitlines()
+                 if line.startswith("Suites:"))
+    return (f"Package: {' '.join(repo.pin_packages)}\n"
+            f"Pin: release n={suite}\n"
+            f"Pin-Priority: {repo.pin_priority}\n")
+
+
+def write_repo_files(target: Target, dest: Path) -> None:
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    for repo in target.extra_repos:
+        (dest / f"{repo.name}.sources").write_text(repo.deb822)
+        (dest / f"{repo.name}.pref").write_text(pin_text(repo))
+
+
 def run_build(
     engine: Engine,
     recipe: Recipe,
@@ -1738,6 +1967,7 @@ def run_build(
     destdir.mkdir(parents=True)
     deps_file = workdir / "runtime-deps.txt"
     deps_file.unlink(missing_ok=True)
+    write_repo_files(target, workdir / "repos")
     run(build_command(engine, recipe, target, root, workdir), check=True)
     runtime = []
     if deps_file.exists():
@@ -1753,6 +1983,8 @@ def run_build(
 # already-built emcomm packages from /work/deps, then runs the recipe's build.sh
 # so that it installs into /work/destdir/opt/emcomm.
 set -euo pipefail
+
+bash /emcomm/tools/container/repos.sh
 
 install_packages() {
   case "$FAMILY" in
@@ -1796,6 +2028,21 @@ cd "$SRC"
 bash "$RECIPE_DIR/build.sh"
 find "$DESTDIR" -name '*.la' -delete
 bash /emcomm/tools/container/runtime-deps.sh "$DESTDIR" > /work/runtime-deps.txt
+```
+
+Also create `tools/container/repos.sh`. It is shared by build.sh and smoke.sh:
+
+```bash
+#!/usr/bin/env bash
+# Install the target's extra repos and apt pins written by the build tool into /work/repos.
+set -euo pipefail
+shopt -s nullglob
+case "$FAMILY" in
+  debian)
+    for f in /work/repos/*.sources; do cp "$f" "/etc/apt/sources.list.d/emcomm-$(basename "$f")"; done
+    for f in /work/repos/*.pref; do cp "$f" "/etc/apt/preferences.d/emcomm-$(basename "$f")"; done
+    ;;
+esac
 ```
 
 - [ ] **Step 5: Create `tools/container/runtime-deps.sh`**
@@ -2185,7 +2432,7 @@ def setup(fake_repo, tmp_path, monkeypatch):
     write_recipe(fake_repo, "wsjtx", app("wsjtx", "3.0.2", depends_on="[hamlib]"))
     calls = []
 
-    def fake_fetch(recipe, workdir, root, cache):
+    def fake_fetch(recipe, workdir, root, cache, arch=None):
         calls.append(("fetch", recipe.name))
         (workdir / "src").mkdir(parents=True, exist_ok=True)
         return workdir / "src"
@@ -2286,7 +2533,10 @@ from .fetch import fetch_source
 from .model import Recipe, Target, load_recipes
 from .net import download
 from .package import build_package, nfpm_config
-from .plan import closure, fetch_manifest, package_filename, plan_builds, published_files
+from .container import write_repo_files
+from .plan import (
+    closure, fetch_manifest, package_filename, plan_builds, published_files, recipes_for_target,
+)
 
 
 class BuildError(Exception):
@@ -2348,7 +2598,10 @@ def smoke(
     recipes: dict[str, Recipe], names: list[str], settings: BuildSettings, manifest: dict | None
 ) -> None:
     workdir = settings.work / settings.target.name / settings.arch / "_smoke"
-    stage(recipes, names, settings, manifest, workdir / "pkgs")
+    staged = stage(recipes, names, settings, manifest, workdir / "pkgs")
+    write_repo_files(settings.target, workdir / "repos")
+    skip = " ".join(f"/opt/emcomm/{r.bundle_dir}" for r in recipes.values()
+                    if r.bundle_dir and any(p.name.startswith(r.package) for p in staged))
     subprocess.run(
         [
             settings.engine.command, "run", "--rm",
@@ -2356,6 +2609,7 @@ def smoke(
             "-v", f"{workdir}:/work:z",
             "-e", f"FAMILY={settings.target.family}",
             "-e", f"SMOKE_RECIPES={' '.join(names)}",
+            "-e", f"SMOKE_SKIP_PATHS={skip}",
             settings.target.image, "bash", "/emcomm/tools/container/smoke.sh",
         ],
         check=True,
@@ -2363,8 +2617,8 @@ def smoke(
 
 
 def run(settings: BuildSettings, *, recipes: dict[str, Recipe] | None = None) -> list[Path]:
-    recipes = recipes or load_recipes(settings.root)
     target, arch = settings.target, settings.arch
+    recipes = recipes_for_target(recipes or load_recipes(settings.root), target)
     manifest = (
         fetch_manifest(settings.repo_url, settings.channel, target.name, arch)
         if settings.repo_url
@@ -2392,7 +2646,7 @@ def run(settings: BuildSettings, *, recipes: dict[str, Recipe] | None = None) ->
             (workdir / "deps").mkdir()
 
         if r.kind == "app":
-            fetch_source(r, workdir, settings.root, settings.work / "cache")
+            fetch_source(r, workdir, settings.root, settings.work / "cache", arch=arch)
             tree, runtime = run_build(settings.engine, r, target, settings.root, workdir)
         elif r.kind == "files":
             tree, runtime = r.dir / r.files_dir, []
@@ -2414,7 +2668,10 @@ def run(settings: BuildSettings, *, recipes: dict[str, Recipe] | None = None) ->
 #!/usr/bin/env bash
 # Install freshly built packages into a pristine container, verify every ELF under
 # /opt/emcomm resolves its shared libraries, then run each recipe's smoke.sh.
+# SMOKE_SKIP_PATHS lists self-contained bundles (extracted AppImages) whose libraries are
+# resolved by their own launcher, not by rpath.
 set -euo pipefail
+bash /emcomm/tools/container/repos.sh
 case "$FAMILY" in
   debian)
     export DEBIAN_FRONTEND=noninteractive
@@ -2428,7 +2685,13 @@ esac
 export PATH=/opt/emcomm/bin:$PATH
 
 failed=0
+skipped() {
+  local p
+  for p in ${SMOKE_SKIP_PATHS:-}; do [[ $1 == "$p"/* ]] && return 0; done
+  return 1
+}
 while IFS= read -r -d '' f; do
+  skipped "$f" && continue
   if file -b "$f" | grep -q '^ELF' && ldd "$f" 2>/dev/null | grep -q 'not found'; then
     echo "unresolved libraries in $f:"
     ldd "$f" | grep 'not found'
@@ -2927,17 +3190,19 @@ git commit -m "feat(build): signed apt/dnf repository publishing with manifests"
 
 ---
 
-### Task 10: `emcomm-base` and hamlib recipes
+### Task 10: `emcomm-base` and hamlib (Fedora) recipes
 
 **Files:**
-- Create: `recipes/base/recipe.yaml`, `recipes/base/files/etc/profile.d/emcomm.sh`, `recipes/base/files/usr/lib/environment.d/50-emcomm.conf`
+- Create: `recipes/base/recipe.yaml`, plus these files under `recipes/base/files/`:
+  - `etc/profile.d/emcomm.sh`
+  - `usr/lib/environment.d/50-emcomm.conf`
+  - `opt/emcomm/libexec/emcomm-run`
 - Create: `recipes/hamlib/recipe.yaml`, `recipes/hamlib/build.sh`, `recipes/hamlib/smoke.sh`
 
 **Interfaces:**
 - Produces:
-  - Package `emcomm-base`, which puts `/opt/emcomm/bin` on PATH and `/opt/emcomm/share` on XDG_DATA_DIRS.
-  - Package `emcomm-hamlib`, which provides `/opt/emcomm/lib/libhamlib.so*`, `/opt/emcomm/lib/pkgconfig/hamlib.pc`, and `/opt/emcomm/bin/{rigctl,rigctld,...}`.
-  - Every later recipe that links hamlib declares `depends_on: [hamlib]`.
+  - Package `emcomm-base`. It puts `/opt/emcomm/bin` on PATH and `/opt/emcomm/share` on XDG_DATA_DIRS. It also ships `/opt/emcomm/libexec/emcomm-run PROG ARGS…`, which runs `/opt/emcomm/bin/PROG` when that exists and otherwise `PROG` from the system PATH. The systemd units (Task 23) use it, so one unit file works whether rigctld comes from Debian backports (`/usr/bin`) or from our Fedora build (`/opt/emcomm/bin`).
+  - Package `emcomm-hamlib` (**Fedora only**, `families: [fedora]`). Fedora ships 4.6.5, which lacks the IC-7300MK2 model and the rigctld CVE fixes. Debian gets 4.7.2 from `trixie-backports` (Task 2 targets, Task 22 role).
 
 - [ ] **Step 1: Create the base recipe**
 
@@ -2946,10 +3211,11 @@ git commit -m "feat(build): signed apt/dnf repository publishing with manifests"
 ```yaml
 name: base
 kind: files
-summary: emcommOS environment (PATH and desktop menu integration for /opt/emcomm)
+summary: emcommOS environment (PATH, menus, service launcher for /opt/emcomm)
 description: >
   Adds /opt/emcomm/bin to PATH and /opt/emcomm/share to XDG_DATA_DIRS for login
-  shells and systemd user sessions, so emcomm applications and menu entries appear.
+  shells and systemd user sessions, and provides the emcomm-run launcher used by
+  emcomm's systemd user units.
 license: Apache-2.0
 version: "1.0.0"
 release: 1
@@ -2979,9 +3245,23 @@ PATH=/opt/emcomm/bin:${PATH}
 XDG_DATA_DIRS=/opt/emcomm/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
 ```
 
+`recipes/base/files/opt/emcomm/libexec/emcomm-run`, mode 0755 (`chmod 755` before committing; git keeps the bit and nFPM copies the mode):
+
+```sh
+#!/bin/sh
+# Run PROG from /opt/emcomm/bin when emcomm packages it, otherwise from the system PATH.
+# Lets one systemd unit work across distro families with different package sources.
+prog=$1
+shift
+if [ -x "/opt/emcomm/bin/$prog" ]; then
+  exec "/opt/emcomm/bin/$prog" "$@"
+fi
+exec "$prog" "$@"
+```
+
 - [ ] **Step 2: Create the hamlib recipe**
 
-`recipes/hamlib/recipe.yaml`. Leave out `sha256`; Step 3 adds it.
+`recipes/hamlib/recipe.yaml` (no `sha256` yet; Step 3 adds it):
 
 ```yaml
 name: hamlib
@@ -2991,6 +3271,7 @@ license: LGPL-2.1-or-later AND GPL-2.0-or-later
 homepage: https://hamlib.github.io/
 version: "4.7.2"
 release: 1
+families: [fedora]   # Debian 13 uses trixie-backports (4.7.2)
 source:
   type: github-release-asset
   repo: Hamlib/Hamlib
@@ -3001,8 +3282,6 @@ upstream:
   repo: Hamlib/Hamlib
   tag_pattern: '(\d+\.\d+(?:\.\d+)?)'
 deps:
-  debian:
-    build: [libreadline-dev, libusb-1.0-0-dev]
   fedora:
     build: [readline-devel, libusb1-devel]
 ```
@@ -3024,9 +3303,9 @@ make install DESTDIR="$DESTDIR"
 #!/usr/bin/env bash
 # Dummy rig directly, then through the rigctld hub exactly as emcomm apps use it.
 set -euo pipefail
-[[ $(rigctl -m 1 f) == 145000000 ]]
-rigctld --version
-rigctld -m 1 -T 127.0.0.1 -t 4532 &
+[[ $(/opt/emcomm/bin/rigctl -m 1 f) == 145000000 ]]
+/opt/emcomm/bin/rigctld --version | grep -q 'Hamlib 4\.7'
+/opt/emcomm/bin/rigctld -m 1 -T 127.0.0.1 -t 4532 &
 pid=$!
 trap 'kill $pid' EXIT
 for _ in $(seq 40); do
@@ -3039,94 +3318,45 @@ done
 - [ ] **Step 3: Pin the release tarball checksum**
 
 Run: `uv run --directory tools emcomm-build bump hamlib 4.7.2`
-Expected: `bumped: hamlib`, and `recipes/hamlib/recipe.yaml` now has a `  sha256: <64 hex>` line under `asset:`.
+Expected: `bumped: hamlib`, and a `  sha256: <64 hex>` line now appears under `asset:`.
 
 Run: `uv run --directory tools emcomm-build validate`
 Expected: `ok: 3 targets, 2 recipes`
 
-- [ ] **Step 4: Build and smoke-test on both families (host arch)**
-
-Run: `uv run --directory tools emcomm-build build --target debian-13 --only hamlib`
-Expected: it builds `emcomm-base` and `emcomm-hamlib`, and the output ends with `smoke OK`.
+- [ ] **Step 4: Build and smoke-test**
 
 Run: `uv run --directory tools emcomm-build build --target fedora-44 --only hamlib`
-Expected: same result for rpm.
+Expected: `emcomm-base` and `emcomm-hamlib` build, and the output ends with `smoke OK`.
 
-If configure reports a missing library, add the matching package to `deps.<family>.build` and re-run. Debian/Fedora names for a header can be found with `apt-file search` or `dnf provides`.
+Run: `uv run --directory tools emcomm-build build --target debian-13 --only base`
+Expected: only `emcomm-base` builds (hamlib doesn't apply to Debian), followed by `smoke OK`.
+
+If configure reports a missing library, add the matching `-devel` package to `deps.fedora.build` and re-run.
 
 - [ ] **Step 5: Shellcheck and commit**
 
-Run: `shellcheck recipes/*/build.sh recipes/*/smoke.sh`
+Run: `shellcheck recipes/*/build.sh recipes/*/smoke.sh recipes/base/files/opt/emcomm/libexec/emcomm-run`
 Expected: no findings.
 
 ```bash
 git add recipes/base recipes/hamlib
-git commit -m "feat(recipes): emcomm-base environment and hamlib 4.7.2"
+git commit -m "feat(recipes): emcomm-base (env + emcomm-run) and hamlib 4.7.2 for Fedora"
 ```
 
 ---
 
-### Task 11: W1HKJ suite recipes — flrig, fldigi, flmsg, flamp
+### Task 11: fldigi and flrig recipes (Debian)
 
 **Files:**
-- Create: `recipes/{flrig,fldigi,flmsg,flamp}/recipe.yaml` and `recipes/{flrig,fldigi,flmsg,flamp}/build.sh`
+- Create: `recipes/fldigi/{recipe.yaml,build.sh}`, `recipes/flrig/{recipe.yaml,build.sh}`
 
 **Interfaces:**
-- Consumes: `emcomm-hamlib` (fldigi only, through `depends_on: [hamlib]`).
-- Produces: packages `emcomm-flrig`, `emcomm-fldigi` (with flarq), `emcomm-flmsg`, and `emcomm-flamp`. Binaries go in `/opt/emcomm/bin` and desktop files in `/opt/emcomm/share/applications`.
+- Produces: `emcomm-fldigi` (with flarq) and `emcomm-flrig`, both **Debian only** (`families: [debian]`). Debian 13 ships fldigi 4.2.06 and flrig 2.0.05; Fedora 43/44 already ship the current 4.2.13 and 2.0.12, so Fedora uses the distro packages. flmsg and flamp are current enough in both distros, so they get no recipes; the toolset metapackages depend on the distro packages (Task 25).
+- fldigi builds against Debian's backports `libhamlib-dev` (4.7.2). The build container gets the backports pin from Task 6 because `libhamlib*` is pinned.
 
-The sources are SourceForge git tags `vX.Y.ZZ` (https), built with `autoreconf -fi` because a git checkout has no `configure`. Latest versions as of 2026-10: fldigi 4.2.13, flrig 2.0.12, flmsg 4.0.24, flamp 2.2.14.
+The source is a SourceForge git tag `vX.Y.ZZ` over https. A git checkout has no `configure`, so the build runs `autoreconf -fi`.
 
-- [ ] **Step 1: Create the shared build script content**
-
-Use this `build.sh` for **flrig, flmsg, and flamp**, in each of `recipes/flrig/build.sh`, `recipes/flmsg/build.sh`, and `recipes/flamp/build.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-autoreconf -fi
-./configure --prefix="$PREFIX"
-make -j"$JOBS"
-make install DESTDIR="$DESTDIR"
-```
-
-`recipes/fldigi/build.sh` builds against our hamlib:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-autoreconf -fi
-./configure --prefix="$PREFIX" --with-hamlib --with-pulseaudio
-make -j"$JOBS"
-make install DESTDIR="$DESTDIR"
-```
-
-- [ ] **Step 2: Create the recipes**
-
-`recipes/flrig/recipe.yaml`:
-
-```yaml
-name: flrig
-kind: app
-summary: FLRig transceiver control program (W1HKJ)
-license: GPL-3.0-or-later
-homepage: http://www.w1hkj.org/
-version: "2.0.12"
-release: 1
-source:
-  type: git
-  url: https://git.code.sf.net/p/fldigi/flrig
-  ref: "v{version}"
-upstream:
-  type: git-tags
-  url: https://git.code.sf.net/p/fldigi/flrig
-  tag_pattern: 'v(\d+\.\d+\.\d+)'
-deps:
-  debian:
-    build: [autoconf, automake, libtool, gettext, autopoint, libfltk1.3-dev, libx11-dev, libxft-dev, libudev-dev]
-  fedora:
-    build: [autoconf, automake, libtool, gettext-devel, fltk-devel, libX11-devel, libXft-devel, systemd-devel]
-```
+- [ ] **Step 1: Create the recipes**
 
 `recipes/fldigi/recipe.yaml`:
 
@@ -3138,6 +3368,7 @@ license: GPL-3.0-or-later
 homepage: http://www.w1hkj.org/
 version: "4.2.13"
 release: 1
+families: [debian]   # Fedora ships current fldigi
 source:
   type: git
   url: https://git.code.sf.net/p/fldigi/fldigi
@@ -3146,190 +3377,88 @@ upstream:
   type: git-tags
   url: https://git.code.sf.net/p/fldigi/fldigi
   tag_pattern: 'v(\d+\.\d+\.\d+)'
-depends_on: [hamlib]
 deps:
   debian:
     build: [autoconf, automake, libtool, gettext, autopoint, libfltk1.3-dev, libpng-dev,
             libsamplerate0-dev, libsndfile1-dev, portaudio19-dev, libpulse-dev, libx11-dev,
-            libxft-dev, libudev-dev, libusb-1.0-0-dev]
-  fedora:
-    build: [autoconf, automake, libtool, gettext-devel, fltk-devel, libpng-devel,
-            libsamplerate-devel, libsndfile-devel, portaudio-devel, pulseaudio-libs-devel,
-            libX11-devel, libXft-devel, systemd-devel, libusb1-devel]
+            libxft-dev, libudev-dev, libusb-1.0-0-dev, libhamlib-dev]
 ```
 
-`recipes/flmsg/recipe.yaml`:
-
-```yaml
-name: flmsg
-kind: app
-summary: FLMsg forms manager for ICS/NBEMS messages (W1HKJ)
-license: GPL-3.0-or-later
-homepage: http://www.w1hkj.org/
-version: "4.0.24"
-release: 1
-source:
-  type: git
-  url: https://git.code.sf.net/p/fldigi/flmsg
-  ref: "v{version}"
-upstream:
-  type: git-tags
-  url: https://git.code.sf.net/p/fldigi/flmsg
-  tag_pattern: 'v(\d+\.\d+\.\d+)'
-deps:
-  debian:
-    build: [autoconf, automake, libtool, gettext, autopoint, libfltk1.3-dev, libx11-dev, libxft-dev]
-  fedora:
-    build: [autoconf, automake, libtool, gettext-devel, fltk-devel, libX11-devel, libXft-devel]
-```
-
-`recipes/flamp/recipe.yaml`:
-
-```yaml
-name: flamp
-kind: app
-summary: FLAMP amateur multicast file transfer (W1HKJ)
-license: GPL-3.0-or-later
-homepage: http://www.w1hkj.org/
-version: "2.2.14"
-release: 1
-source:
-  type: git
-  url: https://git.code.sf.net/p/fldigi/flamp
-  ref: "v{version}"
-upstream:
-  type: git-tags
-  url: https://git.code.sf.net/p/fldigi/flamp
-  tag_pattern: 'v(\d+\.\d+\.\d+)'
-deps:
-  debian:
-    build: [autoconf, automake, libtool, gettext, autopoint, libfltk1.3-dev, libx11-dev, libxft-dev]
-  fedora:
-    build: [autoconf, automake, libtool, gettext-devel, fltk-devel, libX11-devel, libXft-devel]
-```
-
-- [ ] **Step 3: Validate, build, smoke**
-
-Run: `uv run --directory tools emcomm-build validate`
-Expected: `ok: 3 targets, 6 recipes`
-
-Run: `uv run --directory tools emcomm-build build --target debian-13 --only flrig --only fldigi --only flmsg --only flamp`
-Expected: `smoke OK`. The generic ELF check is the smoke test for these GUI apps.
-
-Run: `uv run --directory tools emcomm-build build --target fedora-44 --only flrig --only fldigi --only flmsg --only flamp`
-Expected: `smoke OK`.
-
-If `autoreconf` fails for missing m4 macros, add `pkg-config`/`pkgconf` and `gettext` dev packages to that recipe's build deps. If a configure check fails, add the named library's `-dev`/`-devel` package.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add recipes/flrig recipes/fldigi recipes/flmsg recipes/flamp
-git commit -m "feat(recipes): flrig, fldigi (with hamlib), flmsg, flamp"
-```
-
----
-
-### Task 12: WSJT-X recipe
-
-**Files:**
-- Create: `recipes/wsjtx/recipe.yaml`, `recipes/wsjtx/build.sh`
-
-**Interfaces:**
-- Consumes: `emcomm-hamlib`. WSJT-X finds `hamlib.pc` through `PKG_CONFIG_PATH`/`CMAKE_PREFIX_PATH`.
-- Produces: `emcomm-wsjtx`, with `/opt/emcomm/bin/wsjtx` and `jt9`.
-
-Upstream moved to GitHub (`WSJTX/wsjtx`). Tags look like `v3.0.2`, and the source asset is `wsjtx-<ver>-src.tar.gz`. It is Qt5. Release candidates (`v3.2.0-rc1`) are excluded by the pattern.
-
-- [ ] **Step 1: Create the recipe**
-
-`recipes/wsjtx/recipe.yaml`:
-
-```yaml
-name: wsjtx
-kind: app
-summary: WSJT-X weak-signal digital modes (FT8, FT4, JT65, WSPR, ...)
-license: GPL-3.0-or-later
-homepage: https://wsjt.sourceforge.io/
-version: "3.0.2"
-release: 1
-source:
-  type: github-release-asset
-  repo: WSJTX/wsjtx
-  ref: "v{version}"
-  asset: "wsjtx-{version}-src.tar.gz"
-upstream:
-  type: github-releases
-  repo: WSJTX/wsjtx
-  tag_pattern: 'v(\d+\.\d+\.\d+)'
-depends_on: [hamlib]
-deps:
-  debian:
-    build: [cmake, gfortran, libfftw3-dev, libboost-log-dev, qtbase5-dev, qtmultimedia5-dev,
-            libqt5serialport5-dev, libqt5websockets5-dev, qttools5-dev, qttools5-dev-tools,
-            libusb-1.0-0-dev, portaudio19-dev, libudev-dev]
-    run: [libqt5sql5-sqlite, libqt5multimedia5-plugins]
-  fedora:
-    build: [cmake, gcc-gfortran, fftw-devel, boost-devel, qt5-qtbase-devel,
-            qt5-qtmultimedia-devel, qt5-qtserialport-devel, qt5-qtwebsockets-devel,
-            qt5-linguist, qt5-qttools-devel, libusb1-devel, portaudio-devel, systemd-devel]
-    run: [qt5-qtmultimedia]
-```
-
-`recipes/wsjtx/build.sh`:
+`recipes/fldigi/build.sh`:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCMAKE_PREFIX_PATH="$PREFIX" \
-  -DCMAKE_INSTALL_RPATH="$PREFIX/lib" \
-  -DWSJT_GENERATE_DOCS=OFF \
-  -DWSJT_SKIP_MANPAGES=ON \
-  -DWSJT_BUILD_UTILS=OFF \
-  -DWSJT_BUILD_TESTS=OFF \
-  -DWSJT_ENABLE_TESTS=OFF \
-  -DWSJT_SKIP_BUNDLE_FIXUP=ON \
-  -DWSJT_SKIP_MAP65=ON
-cmake --build build -j"$JOBS"
-DESTDIR="$DESTDIR" cmake --install build
+autoreconf -fi
+./configure --prefix="$PREFIX" --with-hamlib --with-pulseaudio
+make -j"$JOBS"
+make install DESTDIR="$DESTDIR"
 ```
 
-`WSJT_BUILD_TESTS` and `WSJT_ENABLE_TESTS` are both passed because 3.2 renamed the option. CMake warns about whichever one is unused, and that's fine. `WSJT_SKIP_MAP65` avoids map65's GCC 15 failure on Fedora.
+`recipes/flrig/recipe.yaml`:
 
-- [ ] **Step 2: Pin the checksum, build, and smoke**
+```yaml
+name: flrig
+kind: app
+summary: FLRig transceiver control program (W1HKJ)
+license: GPL-3.0-or-later
+homepage: http://www.w1hkj.org/
+version: "2.0.12"
+release: 1
+families: [debian]   # Fedora ships current flrig
+source:
+  type: git
+  url: https://git.code.sf.net/p/fldigi/flrig
+  ref: "v{version}"
+upstream:
+  type: git-tags
+  url: https://git.code.sf.net/p/fldigi/flrig
+  tag_pattern: 'v(\d+\.\d+\.\d+)'
+deps:
+  debian:
+    build: [autoconf, automake, libtool, gettext, autopoint, libfltk1.3-dev, libx11-dev, libxft-dev, libudev-dev]
+```
 
-Run: `uv run --directory tools emcomm-build bump wsjtx 3.0.2`
-Expected: `bumped: wsjtx`, and a `sha256` line is added.
+`recipes/flrig/build.sh`:
 
-Run: `uv run --directory tools emcomm-build build --target debian-13 --only wsjtx`
-Expected: `smoke OK`. This step is slow because of Fortran and Qt.
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+autoreconf -fi
+./configure --prefix="$PREFIX"
+make -j"$JOBS"
+make install DESTDIR="$DESTDIR"
+```
 
-Run: `uv run --directory tools emcomm-build build --target fedora-44 --only wsjtx`
-Expected: `smoke OK`.
+- [ ] **Step 2: Validate, build, smoke**
 
-If linking against hamlib fails with undefined symbols, check `pkg-config --static --libs hamlib` inside a debug container. WSJT-X links with the static ldflags list, so add any listed private library's `-dev` package to the build deps.
+Run: `uv run --directory tools emcomm-build validate`
+Expected: `ok: 3 targets, 4 recipes`
+
+Run: `uv run --directory tools emcomm-build build --target debian-13 --only fldigi --only flrig`
+Expected: `smoke OK`. For these GUI apps the smoke test is the generic ELF check: every library must resolve, including Debian's backports libhamlib.
+
+If `autoreconf` fails because m4 macros are missing, add `pkg-config` and the gettext dev packages to the build deps. If a configure check fails, add the named library's `-dev` package.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add recipes/wsjtx
-git commit -m "feat(recipes): WSJT-X 3.0.2 built against emcomm hamlib"
+git add recipes/fldigi recipes/flrig
+git commit -m "feat(recipes): fldigi 4.2.13 and flrig 2.0.12 for Debian 13"
 ```
 
 ---
 
-### Task 13: JS8Call recipe
+### Task 12: JS8Call recipe (upstream AppImage, prebuilt)
 
 **Files:**
-- Create: `recipes/js8call/recipe.yaml`, `recipes/js8call/build.sh`
+- Create: `recipes/js8call/{recipe.yaml,build.sh,smoke.sh,SHA256SUMS}`
 
 **Interfaces:**
-- Consumes: `emcomm-hamlib`.
-- Produces: `emcomm-js8call` (Qt6, C++20, CMake ≥3.16).
+- Consumes: `arch-url` sources (Task 5), `bundle_dir` smoke skipping (Task 8).
+- Produces: `emcomm-js8call` with the extracted upstream AppImage in `/opt/emcomm/lib/js8call/`, a `/opt/emcomm/bin/js8call` launcher, and a desktop entry.
+
+JS8Call 3.x is developed as **JS8Call-improved**, which publishes only `JS8Call-v<ver>-{x86_64,aarch64}.AppImage`; every distro is still on 2.x. We extract the AppImage at package-build time, so the package needs no FUSE. The binaries keep upstream's bundled Qt. Upstream publishes no checksums, so `emcomm-build bump` pins our own (`SHA256SUMS`) and every later fetch verifies against them.
 
 - [ ] **Step 1: Create the recipe**
 
@@ -3338,155 +3467,110 @@ git commit -m "feat(recipes): WSJT-X 3.0.2 built against emcomm hamlib"
 ```yaml
 name: js8call
 kind: app
-summary: JS8Call keyboard-to-keyboard weak-signal messaging
+summary: JS8Call keyboard-to-keyboard weak-signal messaging (JS8Call-improved, upstream AppImage)
 license: GPL-3.0-or-later
-homepage: https://js8call.com/
-version: "2.3.1"
+homepage: https://github.com/JS8Call-improved/JS8Call-improved
+version: "3.0.3"
 release: 1
+bundle_dir: lib/js8call
 source:
-  type: git
-  url: https://github.com/js8call/js8call
-  ref: "v{version}"
+  type: arch-url
+  urls:
+    amd64: "https://github.com/JS8Call-improved/JS8Call-improved/releases/download/v{version}/JS8Call-v{version}-x86_64.AppImage"
+    arm64: "https://github.com/JS8Call-improved/JS8Call-improved/releases/download/v{version}/JS8Call-v{version}-aarch64.AppImage"
 upstream:
   type: github-releases
-  repo: js8call/js8call
+  repo: JS8Call-improved/JS8Call-improved
   tag_pattern: 'v(\d+\.\d+\.\d+)'
-depends_on: [hamlib]
-deps:
-  debian:
-    build: [cmake, qt6-base-dev, qt6-multimedia-dev, qt6-serialport-dev, libboost-dev,
-            libfftw3-dev, libusb-1.0-0-dev, libudev-dev]
-  fedora:
-    build: [cmake, qt6-qtbase-devel, qt6-qtmultimedia-devel, qt6-qtserialport-devel,
-            boost-devel, fftw-devel, libusb1-devel, systemd-devel]
 ```
 
 `recipes/js8call/build.sh`:
 
 ```bash
 #!/usr/bin/env bash
+# Extract the upstream AppImage (runs natively on this runner's arch; no FUSE needed).
 set -euo pipefail
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCMAKE_PREFIX_PATH="$PREFIX" \
-  -DCMAKE_INSTALL_RPATH="$PREFIX/lib"
-cmake --build build -j"$JOBS"
-DESTDIR="$DESTDIR" cmake --install build
+appimage=$(ls JS8Call-*.AppImage)
+chmod +x "$appimage"
+"./$appimage" --appimage-extract >/dev/null
+lib=$DESTDIR$PREFIX/lib/js8call
+mkdir -p "$DESTDIR$PREFIX/lib" "$DESTDIR$PREFIX/bin" "$DESTDIR$PREFIX/share/applications" \
+  "$DESTDIR$PREFIX/share/icons/hicolor/256x256/apps"
+mv squashfs-root "$lib"
+cat > "$DESTDIR$PREFIX/bin/js8call" <<'EOF'
+#!/bin/sh
+exec /opt/emcomm/lib/js8call/AppRun "$@"
+EOF
+chmod 755 "$DESTDIR$PREFIX/bin/js8call"
+desktop=$(find "$lib" -maxdepth 1 -name '*.desktop' | head -1)
+sed -e 's|^Exec=.*|Exec=js8call|' -e 's|^Icon=.*|Icon=js8call|' "$desktop" \
+  > "$DESTDIR$PREFIX/share/applications/js8call.desktop"
+icon=$(find "$lib" -maxdepth 1 -name '*.png' | head -1)
+if [[ -n $icon ]]; then
+  cp "$icon" "$DESTDIR$PREFIX/share/icons/hicolor/256x256/apps/js8call.png"
+fi
 ```
 
-- [ ] **Step 2: Build and smoke both families**
+`recipes/js8call/smoke.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+test -x /opt/emcomm/lib/js8call/AppRun
+test -x /opt/emcomm/bin/js8call
+grep -q '^Exec=js8call' /opt/emcomm/share/applications/js8call.desktop
+```
+
+- [ ] **Step 2: Pin checksums**
+
+Run: `uv run --directory tools emcomm-build bump js8call 3.0.3`
+Expected: `bumped: js8call` and `recipes/js8call/SHA256SUMS` with two lines (x86_64 and aarch64).
+
+If the download 404s, check the actual tag and asset names on the releases page (`gh release view -R JS8Call-improved/JS8Call-improved`) and fix `urls`/`tag_pattern`.
+
+- [ ] **Step 3: Build and smoke**
 
 Run: `uv run --directory tools emcomm-build build --target debian-13 --only js8call && uv run --directory tools emcomm-build build --target fedora-44 --only js8call`
-Expected: `smoke OK` twice.
+Expected: `smoke OK` twice. The auto-detected runtime dependencies are the host libraries the bundle doesn't carry, such as libGL and fontconfig.
 
-If the Qt Multimedia runtime backend is missing at launch (seen in the Task 27 manual checks), add `qt6-multimedia-plugins`-style run deps for the affected distro. Find the package that owns `libqt6multimedia` plugins with `dpkg -S`/`rpm -qf` inside a container.
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add recipes/js8call
-git commit -m "feat(recipes): JS8Call 2.3.1 (Qt6)"
+git commit -m "feat(recipes): JS8Call-improved 3.0.3 from the upstream AppImage"
 ```
 
 ---
 
-### Task 14: Direwolf and Pat recipes
+### Task 13: Pat recipe (upstream static binary, prebuilt)
 
 **Files:**
-- Create: `recipes/direwolf/{recipe.yaml,build.sh,smoke.sh}`, `recipes/pat/{recipe.yaml,build.sh,smoke.sh}`
+- Create: `recipes/pat/{recipe.yaml,build.sh,smoke.sh,SHA256SUMS}`
 
 **Interfaces:**
-- Produces:
-  - `emcomm-direwolf`, built with hamlib so that `PTT RIG 2 127.0.0.1:4532` works.
-  - `emcomm-pat`, a static Go binary. It talks to rigctld over TCP and needs no hamlib linkage.
+- Produces: `emcomm-pat` with `/opt/emcomm/bin/pat` (upstream's static Go binary, no runtime dependencies) on every family. Distros carry 0.16 (Debian) or nothing (Fedora).
 
-- [ ] **Step 1: Create the Direwolf recipe**
-
-`recipes/direwolf/recipe.yaml`:
-
-```yaml
-name: direwolf
-kind: app
-summary: Dire Wolf software soundcard AX.25 modem/TNC and APRS encoder/decoder
-license: GPL-2.0-or-later
-homepage: https://github.com/wb2osz/direwolf
-version: "1.8.1"
-release: 1
-source:
-  type: git
-  url: https://github.com/wb2osz/direwolf
-  ref: "{version}"
-upstream:
-  type: git-tags
-  url: https://github.com/wb2osz/direwolf
-  tag_pattern: '(\d+\.\d+(?:\.\d+)?)'
-depends_on: [hamlib]
-deps:
-  debian:
-    build: [cmake, libasound2-dev, libudev-dev, libavahi-client-dev, libgps-dev, libusb-1.0-0-dev]
-  fedora:
-    build: [cmake, alsa-lib-devel, systemd-devel, avahi-devel, gpsd-devel, libusb1-devel]
-```
-
-`recipes/direwolf/build.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-sse=ON
-[[ $(uname -m) == x86_64 ]] || sse=OFF
-cmake -S . -B build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCMAKE_PREFIX_PATH="$PREFIX" \
-  -DCMAKE_INSTALL_RPATH="$PREFIX/lib" \
-  -DHAMLIB_ROOT_DIR="$PREFIX" \
-  -DFORCE_SSE="$sse"
-cmake --build build -j"$JOBS"
-DESTDIR="$DESTDIR" cmake --install build
-# Direwolf installs udev rules and samples under /etc; emcomm generates its own rules.
-rm -rf "$DESTDIR/etc"
-```
-
-`recipes/direwolf/smoke.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-out=$(direwolf -h 2>&1 || true)
-grep -qi "dire wolf" <<<"$out"
-# Built with hamlib: the binary must link our libhamlib.
-ldd /opt/emcomm/bin/direwolf | grep -q '/opt/emcomm/lib/libhamlib'
-```
-
-- [ ] **Step 2: Create the Pat recipe**
+- [ ] **Step 1: Create the recipe**
 
 `recipes/pat/recipe.yaml`:
 
 ```yaml
 name: pat
 kind: app
-summary: Pat cross-platform Winlink client
+summary: Pat cross-platform Winlink client (upstream release binary)
 license: MIT
 homepage: https://getpat.io/
 version: "1.0.0"
 release: 1
 source:
-  type: git
-  url: https://github.com/la5nta/pat
-  ref: "v{version}"
+  type: arch-url
+  urls:
+    amd64: "https://github.com/la5nta/pat/releases/download/v{version}/pat_{version}_linux_amd64.tar.gz"
+    arm64: "https://github.com/la5nta/pat/releases/download/v{version}/pat_{version}_linux_arm64.tar.gz"
 upstream:
   type: github-releases
   repo: la5nta/pat
   tag_pattern: 'v(\d+\.\d+\.\d+)'
-deps:
-  debian:
-    build: [golang-go]
-  fedora:
-    build: [golang]
 ```
 
 `recipes/pat/build.sh`:
@@ -3494,10 +3578,10 @@ deps:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-export GOTOOLCHAIN=auto GOFLAGS=-trimpath CGO_ENABLED=0
-export GOPATH=/work/go GOCACHE=/work/go-cache
-mkdir -p "$DESTDIR$PREFIX/bin"
-go build -o "$DESTDIR$PREFIX/bin/pat" .
+tar -xzf pat_*_linux_*.tar.gz
+bin=$(find . -type f -name pat -perm -u+x | head -1)
+[[ -n $bin ]] || { echo "pat binary not found in the release tarball" >&2; exit 1; }
+install -D -m 0755 "$bin" "$DESTDIR$PREFIX/bin/pat"
 ```
 
 `recipes/pat/smoke.sh`:
@@ -3508,16 +3592,246 @@ set -euo pipefail
 pat version | grep -qi pat
 ```
 
-- [ ] **Step 3: Build and smoke**
+- [ ] **Step 2: Pin checksums, build, smoke**
 
-Run: `uv run --directory tools emcomm-build build --target debian-13 --only direwolf --only pat && uv run --directory tools emcomm-build build --target fedora-44 --only direwolf --only pat`
+Run: `uv run --directory tools emcomm-build bump pat 1.0.0`
+Expected: `bumped: pat`, and `SHA256SUMS` has two lines.
+
+Run: `uv run --directory tools emcomm-build build --target debian-13 --only pat && uv run --directory tools emcomm-build build --target fedora-44 --only pat`
 Expected: `smoke OK` twice.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add recipes/direwolf recipes/pat
-git commit -m "feat(recipes): Direwolf 1.8.1 (hamlib PTT) and Pat 1.0.0"
+git add recipes/pat
+git commit -m "feat(recipes): Pat 1.0.0 from the upstream release binary"
+```
+
+---
+
+### Task 14: Freshness report (distro vs upstream)
+
+**Files:**
+- Create: `freshness.yaml`, `tools/src/emcomm_build/freshness.py`
+- Modify: `tools/src/emcomm_build/cli.py` (add `freshness`)
+- Test: `tools/tests/test_freshness.py`
+
+**Interfaces:**
+- Consumes: `upstream.{list_tags, pick_latest}`, `model.Upstream`.
+- Produces:
+  - `freshness.debian_versions(pkg, *, http_text=...) -> dict[str, str]` (suite → version), from Debian madison.
+  - `freshness.fedora_version(pkg, release, *, http_json=...) -> str | None`, from Fedora mdapi.
+  - `freshness.report(entries, ...) -> list[dict]`
+  - CLI: `emcomm-build freshness`. It prints, per app, the latest upstream release and the versions in trixie, trixie-backports, f43, and f44. Rows where a distro already matches upstream are marked `=`.
+- Purpose: choosing between distro, prebuilt, and source stays a reviewed decision (spec §4.1) and never happens automatically.
+
+- [ ] **Step 1: Create `freshness.yaml`**
+
+```yaml
+# Apps to compare against distro packages. Package names are binary package names.
+apps:
+  hamlib:
+    upstream: {type: github-releases, repo: Hamlib/Hamlib, tag_pattern: '(\d+\.\d+(?:\.\d+)?)'}
+    debian: libhamlib-utils
+    fedora: hamlib
+  wsjtx:
+    upstream: {type: github-releases, repo: WSJTX/wsjtx, tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: wsjtx
+    fedora: wsjtx
+  js8call:
+    upstream: {type: github-releases, repo: JS8Call-improved/JS8Call-improved, tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: js8call
+    fedora: js8call
+  fldigi:
+    upstream: {type: git-tags, url: "https://git.code.sf.net/p/fldigi/fldigi", tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: fldigi
+    fedora: fldigi
+  flrig:
+    upstream: {type: git-tags, url: "https://git.code.sf.net/p/fldigi/flrig", tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: flrig
+    fedora: flrig
+  flmsg:
+    upstream: {type: git-tags, url: "https://git.code.sf.net/p/fldigi/flmsg", tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: flmsg
+    fedora: flmsg
+  flamp:
+    upstream: {type: git-tags, url: "https://git.code.sf.net/p/fldigi/flamp", tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: flamp
+    fedora: flamp
+  direwolf:
+    upstream: {type: git-tags, url: "https://github.com/wb2osz/direwolf", tag_pattern: '(\d+\.\d+(?:\.\d+)?)'}
+    debian: direwolf
+    fedora: direwolf
+  pat:
+    upstream: {type: github-releases, repo: la5nta/pat, tag_pattern: 'v(\d+\.\d+\.\d+)'}
+    debian: pat
+  wfview:
+    upstream: {type: git-tags, url: "https://gitlab.com/eliggett/wfview.git", tag_pattern: 'v(\d+\.\d+)'}
+    debian: wfview
+    fedora: wfview
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+`tools/tests/test_freshness.py`:
+
+```python
+from emcomm_build.freshness import debian_versions, fedora_version, report
+from emcomm_build.model import Upstream
+
+MADISON = """\
+ wsjtx | 2.7.0+repack-1   | trixie           | source, amd64, arm64
+ wsjtx | 3.0.2+repack-1~bpo13+1 | trixie-backports | source, amd64, arm64
+ wsjtx | 3.0.2+repack-1   | forky            | source, amd64, arm64
+"""
+
+
+def test_debian_versions_strip_revision():
+    v = debian_versions("wsjtx", http_text=lambda url: MADISON)
+    assert v == {"trixie": "2.7.0", "trixie-backports": "3.0.2", "forky": "3.0.2"}
+
+
+def test_fedora_version():
+    assert fedora_version("wsjtx", 44, http_json=lambda url: {"version": "3.0.1"}) == "3.0.1"
+
+    def missing(url):
+        raise LookupError
+
+    assert fedora_version("pat", 44, http_json=missing) is None
+
+
+def test_report_marks_current():
+    entries = {"wsjtx": {"upstream": Upstream("github-releases", r"v(\d+\.\d+\.\d+)", repo="x"),
+                         "debian": "wsjtx", "fedora": "wsjtx"}}
+    rows = report(entries, tags=lambda up: ["v3.0.2", "v3.0.1"],
+                  deb=lambda pkg: {"trixie": "2.7.0", "trixie-backports": "3.0.2"},
+                  fed=lambda pkg, rel: "3.0.1")
+    assert rows == [{"app": "wsjtx", "upstream": "3.0.2", "trixie": "2.7.0",
+                     "trixie-backports": "=3.0.2", "f43": "3.0.1", "f44": "3.0.1"}]
+```
+
+- [ ] **Step 3: Run the tests to verify they fail**
+
+Run: `uv run --directory tools pytest -q tests/test_freshness.py`
+Expected: FAIL with `ModuleNotFoundError: No module named 'emcomm_build.freshness'`.
+
+- [ ] **Step 4: Implement `freshness.py`**
+
+```python
+"""Compare upstream releases with Debian/Fedora package versions."""
+
+from __future__ import annotations
+
+import json
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Callable
+from pathlib import Path
+
+import yaml
+
+from .model import Upstream
+from .upstream import list_tags, pick_latest
+
+SUITES = ("trixie", "trixie-backports")
+FEDORA = (43, 44)
+
+
+def _get(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        return resp.read()
+
+
+def _upstream_version(raw: str) -> str:
+    """Strip Debian/Fedora packaging decorations: epoch, +repack, ~bpo, -revision."""
+    v = raw.split(":", 1)[-1]
+    v = v.rsplit("-", 1)[0] if "-" in v else v
+    return re.split(r"[+~]", v, maxsplit=1)[0]
+
+
+def debian_versions(pkg: str, *, http_text: Callable[[str], str] | None = None) -> dict[str, str]:
+    url = "https://qa.debian.org/madison.php?text=on&package=" + urllib.parse.quote(pkg)
+    text = http_text(url) if http_text else _get(url).decode()
+    versions: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) >= 3:
+            versions.setdefault(parts[2], _upstream_version(parts[1]))
+    return versions
+
+
+def fedora_version(pkg: str, release: int, *,
+                   http_json: Callable[[str], dict] | None = None) -> str | None:
+    url = f"https://mdapi.fedoraproject.org/f{release}/pkg/{urllib.parse.quote(pkg)}"
+    try:
+        data = http_json(url) if http_json else json.loads(_get(url))
+    except (LookupError, urllib.error.HTTPError):
+        return None
+    return data.get("version")
+
+
+def load_entries(root: Path) -> dict[str, dict]:
+    data = yaml.safe_load((root / "freshness.yaml").read_text())
+    return {name: {**e, "upstream": Upstream(**e["upstream"])} for name, e in data["apps"].items()}
+
+
+def report(entries: dict[str, dict], *, tags=list_tags, deb=debian_versions,
+           fed=fedora_version) -> list[dict]:
+    rows = []
+    for name, e in entries.items():
+        latest = pick_latest(tags(e["upstream"]), e["upstream"].tag_pattern) or "?"
+        row = {"app": name, "upstream": latest}
+        dv = deb(e["debian"]) if e.get("debian") else {}
+        for suite in SUITES:
+            row[suite] = dv.get(suite, "-")
+        for rel in FEDORA:
+            row[f"f{rel}"] = (fed(e["fedora"], rel) if e.get("fedora") else None) or "-"
+        for key in (*SUITES, *(f"f{r}" for r in FEDORA)):
+            if row[key] == latest:
+                row[key] = f"={latest}"
+        rows.append(row)
+    return rows
+```
+
+The test expects `trixie-backports: "=3.0.2"` and `f43: "3.0.1"`, which matches this marking.
+
+- [ ] **Step 5: Add the CLI command**
+
+In `cli.py`, add `from .freshness import load_entries, report` and:
+
+```python
+def cmd_freshness(args: argparse.Namespace) -> int:
+    rows = report(load_entries(repo_root()))
+    cols = ["app", "upstream", "trixie", "trixie-backports", "f43", "f44"]
+    print("  ".join(f"{c:<18}" for c in cols))
+    for row in rows:
+        print("  ".join(f"{row[c]:<18}" for c in cols))
+    print("(= means the distro already ships the latest upstream release)")
+    return 0
+```
+
+Register it in `build_parser`:
+
+```python
+    sub.add_parser("freshness", help="compare distro package versions with upstream").set_defaults(
+        func=cmd_freshness)
+```
+
+- [ ] **Step 6: Run the tests and a live report**
+
+Run: `uv run --directory tools pytest -q && uv run --directory tools ruff check .`
+Expected: PASS.
+
+Run: `uv run --directory tools emcomm-build freshness`
+Expected: a table that matches the sourcing in spec §4.1: hamlib, WSJT-X, and Direwolf show `=` in trixie-backports, fldigi shows `=` on f43 and f44, and so on. Note any surprises in the PR.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add freshness.yaml tools
+git commit -m "feat(build): freshness report comparing distro packages with upstream"
 ```
 
 ---
@@ -4211,7 +4525,7 @@ git commit -m "feat(cli): emcomm CLI scaffolding, models and operator profiles"
 **Files:**
 - Create: `radios/{icom-ic7300,icom-ic705,yaesu-ft991a,kenwood-ts590sg,generic-vox,generic-rts}.yaml`
 - Create: `cli/src/emcomm/radios.py`, `cli/src/emcomm/commands/radios.py`
-- Modify: `cli/src/emcomm/cli.py` (`COMMANDS = [operator, radios]`), `recipes/hamlib/smoke.sh` (append a model check)
+- Modify: `cli/src/emcomm/cli.py` (`COMMANDS = [operator, radios]`)
 - Test: `cli/tests/test_radios.py`
 
 **Interfaces:**
@@ -4465,31 +4779,15 @@ def cmd_radios(args: argparse.Namespace, paths: Paths) -> int:
 
 In `cli.py`, change the import to `from .commands import operator, radios` and set `COMMANDS = [operator, radios]`.
 
-- [ ] **Step 5: Cross-check model numbers against real hamlib in the hamlib smoke test**
-
-Append to `recipes/hamlib/smoke.sh`:
-
-```bash
-# Every radio definition must reference a model this hamlib knows.
-models=$(rigctl -l | awk 'NR > 1 {print $1}')
-for f in /emcomm/radios/*.yaml; do
-  m=$(awk '/^hamlib_model:/ {print $2}' "$f")
-  grep -qx "$m" <<<"$models" || { echo "$f: hamlib model $m not in rigctl -l"; exit 1; }
-done
-```
-
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 5: Run the tests**
 
 Run: `uv run --directory cli pytest -q && uv run --directory cli ruff check .`
-Expected: PASS.
+Expected: PASS. (Task 25's `core` smoke test checks every `hamlib_model` against the real `rigctl -l` on each target.)
 
-Run: `uv run --directory tools emcomm-build build --target debian-13 --only hamlib --force`
-Expected: `smoke OK`, which confirms every model number exists.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add radios cli recipes/hamlib/smoke.sh
+git add radios cli
 git commit -m "feat(cli): radio definitions and emcomm radios"
 ```
 
@@ -4732,7 +5030,7 @@ git commit -m "feat(cli): detect USB serial ports and sound cards from sysfs"
 - Consumes: `detect.*`, `profiles.{save_station, load_station, list_stations}`, `radios.load_radios`, `models.*`.
 - Produces:
   - `udev.udev_env_value(s) -> str`
-  - `udev.render_rules(station, radio) -> str`
+  - `udev.render_rules(station, radio) -> str`: per kit device, the symlink/ALSA rule plus a rule that disables USB autosuspend for that device
   - `udev.apply_udev(paths, stations, radios, *, run=subprocess.run) -> bool`: True if any rules file changed. It deletes stale `70-emcomm-*.rules` files and reloads udev only when `paths.udev_rules == Path("/etc/udev/rules.d")`.
   - CLI:
     - `emcomm station detect`
@@ -4770,9 +5068,15 @@ def test_render_rules():
         'SYMLINK+="emcomm/cat-kita", ENV{ID_MM_DEVICE_IGNORE}="1"'
     )
     assert lines[2] == (
+        'ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="10c4", '
+        'ATTR{idProduct}=="ea60", ATTR{serial}=="IC-7300 03001234 A", TEST=="power/control", '
+        'ATTR{power/control}="on"'
+    )
+    assert lines[3] == (
         'SUBSYSTEM=="sound", KERNEL=="card*", ATTRS{idVendor}=="08bb", '
         'ATTRS{idProduct}=="2901", ATTR{id}="EMCOMM_KITA"'
     )
+    assert lines[4].endswith('ATTR{idProduct}=="2901", TEST=="power/control", ATTR{power/control}="on"')
 
 
 def test_render_without_devices():
@@ -4888,7 +5192,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from .models import RadioDef, Station
+from .models import RadioDef, Station, UsbMatch
 from .paths import Paths
 
 SYSTEM_RULES = Path("/etc/udev/rules.d")
@@ -4904,6 +5208,16 @@ def rules_path(paths: Paths, station: Station) -> Path:
     return paths.udev_rules / f"70-emcomm-{station.name}.rules"
 
 
+def _no_autosuspend(m: UsbMatch) -> str:
+    """Laptops autosuspend idle USB devices, which drops CAT/audio mid-QSO; keep kit devices on."""
+    keys = ['ACTION=="add"', 'SUBSYSTEM=="usb"', 'ENV{DEVTYPE}=="usb_device"',
+            f'ATTR{{idVendor}}=="{m.vendor_id}"', f'ATTR{{idProduct}}=="{m.product_id}"']
+    if m.serial:
+        keys.append(f'ATTR{{serial}}=="{m.serial}"')
+    keys += ['TEST=="power/control"', 'ATTR{power/control}="on"']
+    return ", ".join(keys)
+
+
 def render_rules(station: Station, radio: RadioDef) -> str:
     lines = [f"# Managed by emcomm: station {station.name} ({radio.label}). "
              "Regenerate with `emcomm station apply-udev`."]
@@ -4917,6 +5231,7 @@ def render_rules(station: Station, radio: RadioDef) -> str:
             keys.append(f'ENV{{ID_USB_INTERFACE_NUM}}=="{m.interface}"')
         keys += [f'SYMLINK+="emcomm/cat-{station.name}"', 'ENV{ID_MM_DEVICE_IGNORE}="1"']
         lines.append(", ".join(keys))
+        lines.append(_no_autosuspend(m))
     if station.audio:
         m = station.audio
         keys = ['SUBSYSTEM=="sound"', 'KERNEL=="card*"', f'ATTRS{{idVendor}}=="{m.vendor_id}"',
@@ -4925,6 +5240,7 @@ def render_rules(station: Station, radio: RadioDef) -> str:
             keys.append(f'ATTRS{{serial}}=="{m.serial}"')
         keys.append(f'ATTR{{id}}="{station.alsa_id}"')
         lines.append(", ".join(keys))
+        lines.append(_no_autosuspend(m))
     return "\n".join(lines) + "\n"
 
 
@@ -5991,6 +6307,8 @@ git commit -m "feat(cli): emcomm use with diff, backups and service restart; emc
   - `emcomm_channel` (default `testing`)
   - `emcomm_users` (default `[]`)
   - `emcomm_repo_refresh` (default `true`)
+  - `emcomm_chrony_enable` (default `true`)
+- On Debian it also writes `/etc/apt/sources.list.d/emcomm-backports.sources` and `/etc/apt/preferences.d/emcomm-backports.pref`, with the same pin as `targets.yaml`.
 - Produces the repo files:
   - Debian: `/etc/apt/sources.list.d/emcomm.sources` and `/usr/share/keyrings/emcomm-archive-keyring.asc`
   - Fedora: `/etc/yum.repos.d/emcomm-<channel>.repo` and `/etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm`
@@ -6066,6 +6384,8 @@ emcomm_channel: testing
 emcomm_users: []
 # Refresh package metadata after changing the repository definition.
 emcomm_repo_refresh: true
+# Install and enable chrony (disable in containers without systemd).
+emcomm_chrony_enable: true
 ```
 
 `roles/base/vars/Debian.yml`:
@@ -6073,6 +6393,10 @@ emcomm_repo_refresh: true
 ```yaml
 emcomm_radio_groups: [dialout, audio, plugdev]
 emcomm_chrony_service: chrony
+# Must match the debian-13 extra_repos entry in targets.yaml (tools/tests/test_ansible_sync.py).
+emcomm_backports_suite: trixie-backports
+emcomm_backports_packages: ["libhamlib*", "wsjtx*", "direwolf"]
+emcomm_backports_priority: 500
 ```
 
 `roles/base/vars/RedHat.yml`:
@@ -6104,12 +6428,14 @@ emcomm_chrony_service: chronyd
   ansible.builtin.package:
     name: chrony
     state: present
+  when: emcomm_chrony_enable
 
 - name: Enable chrony
   ansible.builtin.service:
     name: "{{ emcomm_chrony_service }}"
     enabled: true
     state: started
+  when: emcomm_chrony_enable
 
 - name: Ensure radio groups exist
   ansible.builtin.group:
@@ -6141,10 +6467,33 @@ emcomm_chrony_service: chronyd
     mode: "0644"
   register: emcomm_apt_source
 
+- name: Add Debian backports (only pinned packages are taken from it)
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/emcomm-backports.sources
+    mode: "0644"
+    content: |
+      # Managed by emcommOS. Only packages listed in preferences.d/emcomm-backports.pref
+      # are installed from backports.
+      Types: deb
+      URIs: http://deb.debian.org/debian
+      Suites: {{ emcomm_backports_suite }}
+      Components: main
+      Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+  register: emcomm_backports_source
+
+- name: Pin selected packages to backports
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/emcomm-backports.pref
+    mode: "0644"
+    content: |
+      Package: {{ emcomm_backports_packages | join(' ') }}
+      Pin: release n={{ emcomm_backports_suite }}
+      Pin-Priority: {{ emcomm_backports_priority }}
+
 - name: Refresh apt metadata
   ansible.builtin.apt:
     update_cache: true
-  when: emcomm_apt_source.changed and emcomm_repo_refresh
+  when: (emcomm_apt_source.changed or emcomm_backports_source.changed) and emcomm_repo_refresh
 ```
 
 `roles/base/templates/emcomm.sources.j2`:
@@ -6269,6 +6618,19 @@ RUN if command -v apt-get >/dev/null; then \
           - "'Suites: debian-13' in (emcomm_sources.content | b64decode)"
       when: ansible_os_family == "Debian"
 
+    - name: Read the backports pin
+      ansible.builtin.slurp:
+        src: /etc/apt/preferences.d/emcomm-backports.pref
+      register: emcomm_pin
+      when: ansible_os_family == "Debian"
+
+    - name: Check the backports pin
+      ansible.builtin.assert:
+        that:
+          - "'Pin: release n=trixie-backports' in (emcomm_pin.content | b64decode)"
+          - "'libhamlib*' in (emcomm_pin.content | b64decode)"
+      when: ansible_os_family == "Debian"
+
     - name: Read the dnf repo
       ansible.builtin.slurp:
         src: /etc/yum.repos.d/emcomm-testing.repo
@@ -6311,6 +6673,31 @@ Each contains:
   ansible.builtin.meta: noop
 ```
 
+- [ ] **Step 4b: Guard against pin drift between CI and real machines**
+
+`tools/tests/test_ansible_sync.py`:
+
+```python
+import yaml
+
+from emcomm_build.model import load_targets
+
+from conftest import REAL_ROOT
+
+VARS = REAL_ROOT / "ansible/ansible_collections/emcomm/station/roles/base/vars/Debian.yml"
+
+
+def test_backports_pin_matches_targets():
+    repo = load_targets(REAL_ROOT)["debian-13"].extra_repos[0]
+    role = yaml.safe_load(VARS.read_text())
+    assert role["emcomm_backports_packages"] == list(repo.pin_packages)
+    assert role["emcomm_backports_priority"] == repo.pin_priority
+    assert f"Suites: {role['emcomm_backports_suite']}" in repo.deb822
+```
+
+Run: `uv run --directory tools pytest -q tests/test_ansible_sync.py`
+Expected: PASS.
+
 - [ ] **Step 5: Lint and run Molecule**
 
 ```bash
@@ -6330,7 +6717,7 @@ Add `.venv-ansible/` to `.gitignore`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ansible .gitignore
+git add ansible .gitignore tools/tests/test_ansible_sync.py
 git commit -m "feat(ansible): emcomm.station collection with base role and molecule tests"
 ```
 
@@ -6350,7 +6737,7 @@ All paths are under `ansible/ansible_collections/emcomm/station/`.
 - Consumes: the packages `emcomm-<toolset>`, the `/opt/emcomm/bin/emcomm station apply-udev` command (Task 18), and the env and config files written by `emcomm use` (Task 21).
 - Produces:
   - Role variables `emcomm_toolsets` (default `[standard]`) and `emcomm_stations` (default `[]`). Each list item has the station schema shape: `name`, `radio`, optional `ptt`, `cat`, `audio`.
-  - User units in `/etc/systemd/user/`. They are not enabled; operators start them with `systemctl --user enable --now emcomm-rigctld` (mode switching arrives in M2).
+  - User units in `/etc/systemd/user/`. They are not enabled; operators start them with `systemctl --user enable --now emcomm-rigctld` (mode switching arrives in M2). Each runs its program through `/opt/emcomm/libexec/emcomm-run` (Task 10), so the same unit works with distro binaries (Debian rigctld/direwolf) and emcomm-built ones (Fedora rigctld, Pat).
 
 - [ ] **Step 1: Write the roles**
 
@@ -6435,7 +6822,7 @@ Documentation=man:rigctld(1)
 
 [Service]
 EnvironmentFile=%h/.config/emcomm/rigctld.env
-ExecStart=/opt/emcomm/bin/rigctld $RIGCTLD_ARGS
+ExecStart=/opt/emcomm/libexec/emcomm-run rigctld $RIGCTLD_ARGS
 Restart=on-failure
 RestartSec=5
 
@@ -6452,7 +6839,7 @@ Wants=emcomm-rigctld.service
 After=emcomm-rigctld.service
 
 [Service]
-ExecStart=/opt/emcomm/bin/direwolf -t 0 -c %h/.config/emcomm/direwolf.conf
+ExecStart=/opt/emcomm/libexec/emcomm-run direwolf -t 0 -c %h/.config/emcomm/direwolf.conf
 Restart=on-failure
 RestartSec=5
 
@@ -6469,7 +6856,7 @@ Wants=emcomm-rigctld.service
 After=emcomm-rigctld.service
 
 [Service]
-ExecStart=/opt/emcomm/bin/pat http
+ExecStart=/opt/emcomm/libexec/emcomm-run pat http
 Restart=on-failure
 RestartSec=5
 
@@ -6570,20 +6957,25 @@ git commit -m "feat(ansible): toolsets, radio_hw and services roles"
 
 ---
 
-### Task 24: `emcomm bootstrap` and `bootstrap.sh`
+### Task 24: Bootstrap with consent, uninstall, and `emcomm bootstrap|uninstall`
 
 **Files:**
-- Create: `cli/src/emcomm/commands/bootstrap.py`, `bootstrap.sh`
-- Modify: `cli/src/emcomm/cli.py` (add `bootstrap` to `COMMANDS`)
+- Create: `cli/src/emcomm/commands/bootstrap.py`, `cli/src/emcomm/commands/uninstall.py`, `bootstrap.sh`
+- Modify: `cli/src/emcomm/cli.py` (add `bootstrap` and `uninstall` to `COMMANDS`)
 - Test: `cli/tests/test_bootstrap.py`
 
 **Interfaces:**
-- Consumes: `paths.ansible_dir` (installed at `/opt/emcomm/share/emcomm/ansible` by the `cli` package in Task 25) and `playbooks/station.yml` (Task 22).
+- Consumes: `paths.ansible_dir` and `paths.share / "bootstrap.sh"`, both installed by the `cli` package in Task 25, plus `playbooks/station.yml` from Task 22.
 - Produces:
+  - `bootstrap.bootstrap_vars(repo_url, channel, toolsets, users, overrides) -> dict`
+  - `bootstrap.parse_overrides(["k=v", ...]) -> dict` (values are parsed as JSON when possible, otherwise kept as strings)
   - `bootstrap.playbook_command(paths, vars_file, check) -> list[str]`
-  - `bootstrap.bootstrap_vars(repo_url, channel, toolsets, users) -> dict`
-  - CLI: `emcomm bootstrap --repo-url URL [--channel testing] [--toolsets standard] [--user NAME] [--check]`
-  - `bootstrap.sh [--repo-url URL] [--channel C] [--toolsets a,b] [--no-provision]`, plus env equivalents `EMCOMM_REPO_URL`, `EMCOMM_CHANNEL`, `EMCOMM_TOOLSETS`. It verifies the repo key fingerprint against `keys/fingerprint.txt`.
+  - CLI: `emcomm bootstrap --repo-url URL [--channel testing] [--toolsets standard] [--user NAME] [--set KEY=VALUE]... [--check] [--yes]`, which prints a summary and asks for confirmation unless `--yes` is given
+  - CLI: `emcomm uninstall [--yes]`, which runs the packaged `bootstrap.sh --uninstall` from a temp copy
+  - `bootstrap.sh [--repo-url URL] [--channel C] [--toolsets a,b] [--no-provision] [--yes] [--uninstall]` with env equivalents `EMCOMM_REPO_URL`, `EMCOMM_CHANNEL`, `EMCOMM_TOOLSETS`. It verifies the repository key against the pinned fingerprint from `keys/fingerprint.txt`.
+- BYOD rules (spec §2):
+  - Show every change before making it and ask for confirmation. Read the answer from `/dev/tty` so `curl | sh` still works; with no terminal, require `--yes`.
+  - Make every change reversible with `--uninstall`. Uninstall keeps the user's own files: `~/.config/*` and app settings.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -6597,14 +6989,18 @@ from pathlib import Path
 
 from emcomm.cli import main
 from emcomm.commands import bootstrap as bs
+from emcomm.commands import uninstall as un
 
 REPO = Path(__file__).resolve().parents[2]
 
 
-def test_vars():
-    assert bs.bootstrap_vars("https://r/", "testing", "core,digital", ["alice"]) == {
+def test_vars_and_overrides():
+    overrides = bs.parse_overrides(["emcomm_chrony_enable=false", "note=hello"])
+    assert overrides == {"emcomm_chrony_enable": False, "note": "hello"}
+    assert bs.bootstrap_vars("https://r/", "testing", "core,digital", ["alice"], overrides) == {
         "emcomm_repo_url": "https://r", "emcomm_channel": "testing",
-        "emcomm_toolsets": ["core", "digital"], "emcomm_users": ["alice"]}
+        "emcomm_toolsets": ["core", "digital"], "emcomm_users": ["alice"],
+        "emcomm_chrony_enable": False, "note": "hello"}
 
 
 def test_playbook_command(paths, tmp_path):
@@ -6619,24 +7015,43 @@ def test_bootstrap_runs_ansible(paths, monkeypatch, capsys):
     seen = {}
 
     def fake_run(cmd, env, check):
-        seen["cmd"] = cmd
         seen["env"] = env
-        vars_file = cmd[cmd.index("-e") + 1][1:]
-        seen["vars"] = json.loads(Path(vars_file).read_text())
+        seen["vars"] = json.loads(Path(cmd[cmd.index("-e") + 1][1:]).read_text())
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(bs.subprocess, "run", fake_run)
     monkeypatch.setattr(bs.os, "geteuid", lambda: 0)
     monkeypatch.setenv("SUDO_USER", "alice")
-    assert main(["bootstrap", "--repo-url", "https://r", "--toolsets", "core"], paths=paths) == 0
+    assert main(["bootstrap", "--repo-url", "https://r", "--toolsets", "core", "--yes"],
+                paths=paths) == 0
     assert seen["vars"]["emcomm_users"] == ["alice"]
     assert seen["env"]["ANSIBLE_COLLECTIONS_PATH"] == str(paths.ansible_dir)
+    assert "emcomm-core" in capsys.readouterr().out
+
+
+def test_bootstrap_declined(paths, monkeypatch):
+    monkeypatch.setattr(bs.os, "geteuid", lambda: 0)
+    monkeypatch.setattr("builtins.input", lambda _p: "n")
+    assert main(["bootstrap", "--repo-url", "https://r"], paths=paths) == 1
 
 
 def test_bootstrap_needs_root(paths, monkeypatch, capsys):
     monkeypatch.setattr(bs.os, "geteuid", lambda: 1000)
-    assert main(["bootstrap", "--repo-url", "https://r"], paths=paths) == 1
+    assert main(["bootstrap", "--repo-url", "https://r", "--yes"], paths=paths) == 1
     assert "sudo" in capsys.readouterr().err
+
+
+def test_uninstall_runs_packaged_script(paths, monkeypatch, tmp_path):
+    script = paths.share / "bootstrap.sh"
+    calls = []
+    monkeypatch.setattr(un.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(un.subprocess, "run",
+                        lambda cmd, check: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    assert script.is_file()  # the repo root doubles as share in tests
+    assert main(["uninstall", "--yes"], paths=paths) == 0
+    assert calls[0][0] == "sh" and calls[0][1].endswith("bootstrap.sh")
+    assert calls[0][2:] == ["--uninstall", "--yes"]
+    assert calls[0][1] != str(script)  # runs a temp copy; the package removes the original
 
 
 def test_bootstrap_sh_pins_project_fingerprint():
@@ -6653,7 +7068,7 @@ Expected: FAIL with `ImportError: cannot import name 'bootstrap'`.
 - [ ] **Step 3: Implement `commands/bootstrap.py`**
 
 ```python
-"""`emcomm bootstrap` — run the emcomm.station playbook against this machine."""
+"""`emcomm bootstrap` — apply the emcomm.station playbook to this machine (with consent)."""
 
 from __future__ import annotations
 
@@ -6672,23 +7087,41 @@ PLAYBOOK = "ansible_collections/emcomm/station/playbooks/station.yml"
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("bootstrap", help="provision this machine as an emcomm station (root)")
+    p = sub.add_parser("bootstrap", help="set this machine up as an emcomm station (root)")
     p.add_argument("--repo-url", default=os.environ.get("EMCOMM_REPO_URL", ""))
     p.add_argument("--channel", default=os.environ.get("EMCOMM_CHANNEL", "testing"))
     p.add_argument("--toolsets", default=os.environ.get("EMCOMM_TOOLSETS", "standard"),
                    help="comma-separated toolsets (default: standard)")
     p.add_argument("--user", action="append", default=[],
-                   help="operator account to add to radio groups (default: the sudo user)")
+                   help="account to add to radio groups (default: the sudo user)")
+    p.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE",
+                   help="extra Ansible variable (advanced / managed installs)")
     p.add_argument("--check", action="store_true", help="dry run (ansible --check)")
+    p.add_argument("--yes", "-y", action="store_true", help="do not ask for confirmation")
     p.set_defaults(func=cmd_bootstrap)
 
 
-def bootstrap_vars(repo_url: str, channel: str, toolsets: str, users: list[str]) -> dict:
+def parse_overrides(items: list[str]) -> dict:
+    out = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise ProfileError(f"--set expects KEY=VALUE, got {item!r}")
+        try:
+            out[key] = json.loads(value)
+        except json.JSONDecodeError:
+            out[key] = value
+    return out
+
+
+def bootstrap_vars(repo_url: str, channel: str, toolsets: str, users: list[str],
+                   overrides: dict) -> dict:
     return {
         "emcomm_repo_url": repo_url.rstrip("/"),
         "emcomm_channel": channel,
         "emcomm_toolsets": [t.strip() for t in toolsets.split(",") if t.strip()],
         "emcomm_users": users,
+        **overrides,
     }
 
 
@@ -6700,6 +7133,22 @@ def playbook_command(paths: Paths, vars_file: Path, check: bool) -> list[str]:
     return cmd
 
 
+def _summary(data: dict) -> str:
+    toolsets = ", ".join(f"emcomm-{t}" for t in data["emcomm_toolsets"]) or "(none)"
+    users = ", ".join(data["emcomm_users"]) or "(none)"
+    return "\n".join([
+        "emcomm bootstrap will:",
+        f"  - configure the emcommOS repository ({data['emcomm_repo_url']}, "
+        f"{data['emcomm_channel']})",
+        "  - on Debian: enable trixie-backports, pinned to hamlib/WSJT-X/Direwolf only",
+        f"  - install toolsets: {toolsets} (may upgrade those distro packages)",
+        "  - install and enable chrony (time sync, needed for FT8/JS8)",
+        f"  - add {users} to the radio groups (dialout, audio, ...)",
+        "  - install emcomm systemd user units (not enabled)",
+        "Undo with: sudo emcomm uninstall",
+    ])
+
+
 def cmd_bootstrap(args: argparse.Namespace, paths: Paths) -> int:
     if not args.repo_url:
         raise ProfileError("set --repo-url or EMCOMM_REPO_URL")
@@ -6707,7 +7156,12 @@ def cmd_bootstrap(args: argparse.Namespace, paths: Paths) -> int:
         raise ProfileError("bootstrap changes system configuration; run it with sudo")
     users = args.user or [os.environ.get("SUDO_USER") or getpass.getuser()]
     users = [u for u in users if u != "root"]
-    data = bootstrap_vars(args.repo_url, args.channel, args.toolsets, users)
+    data = bootstrap_vars(args.repo_url, args.channel, args.toolsets, users,
+                          parse_overrides(args.overrides))
+    print(_summary(data))
+    if not args.yes and input("Continue? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("aborted; nothing was changed")
+        return 1
     with tempfile.TemporaryDirectory() as tmp:
         vars_file = Path(tmp) / "vars.json"
         vars_file.write_text(json.dumps(data))
@@ -6717,17 +7171,58 @@ def cmd_bootstrap(args: argparse.Namespace, paths: Paths) -> int:
     return result.returncode
 ```
 
-In `cli.py`, add `bootstrap` to the command imports and append it to `COMMANDS`.
+- [ ] **Step 4: Implement `commands/uninstall.py`**
 
-- [ ] **Step 4: Create `bootstrap.sh`**
+```python
+"""`emcomm uninstall` — remove everything emcommOS added (runs bootstrap.sh --uninstall)."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from ..paths import Paths
+from ..validation import ProfileError
+
+
+def register(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("uninstall", help="remove emcommOS packages, repo, pins, units, rules")
+    p.add_argument("--yes", "-y", action="store_true", help="do not ask for confirmation")
+    p.set_defaults(func=cmd_uninstall)
+
+
+def cmd_uninstall(args: argparse.Namespace, paths: Paths) -> int:
+    if os.geteuid() != 0:
+        raise ProfileError("uninstall changes system configuration; run it with sudo")
+    script = paths.share / "bootstrap.sh"
+    if not script.is_file():
+        raise ProfileError(f"{script} not found; run bootstrap.sh --uninstall manually")
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / "bootstrap.sh"
+        shutil.copy2(script, copy)  # the package being removed owns the original
+        cmd = ["sh", str(copy), "--uninstall"] + (["--yes"] if args.yes else [])
+        return subprocess.run(cmd, check=False).returncode
+```
+
+The test's fake `run` takes `check`, so it passes `check=False` through unchanged.
+
+In `cli.py`, add `bootstrap` and `uninstall` to the command imports and to `COMMANDS`.
+
+- [ ] **Step 5: Create `bootstrap.sh`**
 
 ```sh
 #!/bin/sh
-# emcommOS bootstrap: trust the emcommOS signing key (pinned below), add the package
-# repository, install the emcomm CLI, then provision this machine with Ansible.
+# emcommOS bootstrap: shows what it will change, asks first, trusts the emcommOS signing key
+# (pinned below), adds the package repository, installs the emcomm CLI, then sets the machine
+# up with Ansible. Everything can be undone with --uninstall.
 #
 #   curl -fsSL "$EMCOMM_REPO_URL/bootstrap.sh" | sudo EMCOMM_REPO_URL="$EMCOMM_REPO_URL" sh
-#   sudo sh bootstrap.sh --repo-url URL [--channel testing] [--toolsets standard] [--no-provision]
+#   sudo sh bootstrap.sh --repo-url URL [--channel testing] [--toolsets standard]
+#                        [--no-provision] [--yes] [--uninstall]
 set -eu
 
 EMCOMM_KEY_FINGERPRINT="__FINGERPRINT__"
@@ -6735,8 +7230,18 @@ REPO_URL=${EMCOMM_REPO_URL:-}
 CHANNEL=${EMCOMM_CHANNEL:-testing}
 TOOLSETS=${EMCOMM_TOOLSETS:-standard}
 PROVISION=1
+YES=0
+UNINSTALL=0
 
 die() { echo "bootstrap: $*" >&2; exit 1; }
+
+confirm() {
+  [ "$YES" -eq 1 ] && return 0
+  [ -r /dev/tty ] || die "no terminal to confirm on; re-run with --yes"
+  printf '%s [y/N] ' "$1" > /dev/tty
+  read -r answer < /dev/tty
+  case $answer in y|Y|yes|YES) return 0 ;; *) echo "aborted; nothing was changed"; exit 1 ;; esac
+}
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -6744,20 +7249,67 @@ while [ $# -gt 0 ]; do
     --channel) CHANNEL=$2; shift 2 ;;
     --toolsets) TOOLSETS=$2; shift 2 ;;
     --no-provision) PROVISION=0; shift ;;
+    --yes|-y) YES=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
     *) die "unknown option: $1" ;;
   esac
 done
 REPO_URL=${REPO_URL%/}
 
-[ -n "$REPO_URL" ] || die "set EMCOMM_REPO_URL or pass --repo-url"
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
+# shellcheck source=/dev/null
 . /etc/os-release
-
 case " ${ID_LIKE:-} $ID " in
   *" debian "*) FAMILY=debian ;;
   *" fedora "*|*" rhel "*) FAMILY=fedora ;;
   *) die "unsupported distribution '$ID' (M1 supports Debian 13 and Fedora)" ;;
 esac
+
+uninstall() {
+  echo "emcommOS uninstall will remove: emcomm packages (and dependencies only they needed),"
+  echo "  the emcommOS repository and key, the backports source and pin, emcomm user units,"
+  echo "  emcomm udev rules and /etc/emcomm. Your files in ~/.config and app settings are kept."
+  confirm "Remove emcommOS?"
+  if [ "$FAMILY" = debian ]; then
+    pkgs=$(dpkg-query -W -f='${db:Status-Abbrev}${Package}\n' 'emcomm-*' 2>/dev/null \
+           | awk '/^ii/ {print substr($0, 4)}')
+    if [ -n "$pkgs" ]; then
+      # shellcheck disable=SC2086
+      apt-get remove -y $pkgs
+      apt-get autoremove -y
+    fi
+    rm -f /etc/apt/sources.list.d/emcomm.sources /etc/apt/sources.list.d/emcomm-backports.sources \
+          /etc/apt/preferences.d/emcomm-backports.pref /usr/share/keyrings/emcomm-archive-keyring.asc
+    apt-get update -qq || true
+  else
+    pkgs=$(rpm -qa --qf '%{NAME}\n' 'emcomm-*')
+    if [ -n "$pkgs" ]; then
+      # shellcheck disable=SC2086
+      dnf -y remove $pkgs
+    fi
+    rm -f /etc/yum.repos.d/emcomm-*.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
+  fi
+  rm -f /etc/systemd/user/emcomm-*.service /etc/udev/rules.d/70-emcomm-*.rules
+  rm -rf /etc/emcomm
+  udevadm control --reload 2>/dev/null || true
+  echo "emcommOS removed. Group memberships (dialout, audio) and chrony were left in place."
+}
+
+if [ "$UNINSTALL" -eq 1 ]; then
+  uninstall
+  exit 0
+fi
+
+[ -n "$REPO_URL" ] || die "set EMCOMM_REPO_URL or pass --repo-url"
+echo "emcommOS bootstrap will:"
+echo "  - trust the emcommOS signing key $EMCOMM_KEY_FINGERPRINT"
+echo "  - add the package repository $REPO_URL/$CHANNEL"
+echo "  - install emcomm-cli (with ansible-core)"
+if [ "$PROVISION" -eq 1 ]; then
+  echo "  - then run 'emcomm bootstrap' for toolsets: $TOOLSETS (it lists its own changes)"
+fi
+echo "Undo later with: sudo sh bootstrap.sh --uninstall  (or: sudo emcomm uninstall)"
+confirm "Continue?"
 
 if [ "$FAMILY" = debian ]; then
   export DEBIAN_FRONTEND=noninteractive
@@ -6799,29 +7351,30 @@ EOF
 fi
 
 if [ "$PROVISION" -eq 1 ]; then
-  exec /opt/emcomm/bin/emcomm bootstrap --repo-url "$REPO_URL" --channel "$CHANNEL" \
-    --toolsets "$TOOLSETS"
+  set -- --repo-url "$REPO_URL" --channel "$CHANNEL" --toolsets "$TOOLSETS"
+  [ "$YES" -eq 1 ] && set -- "$@" --yes
+  exec /opt/emcomm/bin/emcomm bootstrap "$@"
 fi
-echo "emcomm CLI installed; run 'sudo emcomm bootstrap' to provision."
+echo "emcomm CLI installed; run 'sudo emcomm bootstrap' to finish setting up this machine."
 ```
 
-Pin the project key fingerprint from Task 1:
+Pin the project key fingerprint (from Task 1):
 
 ```bash
 sed -i "s/__FINGERPRINT__/$(cat keys/fingerprint.txt)/" bootstrap.sh
 chmod +x bootstrap.sh
 ```
 
-- [ ] **Step 5: Run the tests and shellcheck**
+- [ ] **Step 6: Run the tests and shellcheck**
 
 Run: `uv run --directory cli pytest -q && uv run --directory cli ruff check . && shellcheck bootstrap.sh`
-Expected: PASS with no shellcheck findings. (`. /etc/os-release` may need `# shellcheck source=/dev/null` on the line above it.)
+Expected: PASS, no findings.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add cli bootstrap.sh
-git commit -m "feat: emcomm bootstrap and pinned-key bootstrap.sh"
+git commit -m "feat: consent-first bootstrap with uninstall; emcomm bootstrap/uninstall"
 ```
 
 ---
@@ -6830,16 +7383,25 @@ git commit -m "feat: emcomm bootstrap and pinned-key bootstrap.sh"
 
 **Files:**
 - Create: `recipes/cli/{recipe.yaml,build.sh,smoke.sh}`
-- Create: `recipes/{core,digital,winlink,standard}/recipe.yaml`
+- Create: `recipes/{core,digital,winlink,standard}/recipe.yaml`, `recipes/core/smoke.sh`
 
 **Interfaces:**
-- Consumes: `cli/`, `radios/`, and `ansible/` from the repo, through a `local` source.
+- Consumes: `cli/`, `radios/`, `ansible/`, and `bootstrap.sh` from the repo (a `local` source), plus every recipe from Tasks 10–13.
 - Produces:
-  - `emcomm-cli`: venv at `/opt/emcomm/lib/emcomm-cli`, `/opt/emcomm/bin/emcomm`, `/opt/emcomm/share/emcomm/radios/*.yaml`, and `/opt/emcomm/share/emcomm/ansible/ansible_collections/emcomm/station/`. It depends on distro `python3` and `ansible-core`.
-  - `emcomm-core` = base + hamlib + flrig + cli
-  - `emcomm-digital` = core + wsjtx + js8call + fldigi + flmsg + flamp
-  - `emcomm-winlink` = core + direwolf + pat
-  - `emcomm-standard` = core + digital + winlink
+  - `emcomm-cli`:
+    - venv at `/opt/emcomm/lib/emcomm-cli` and `/opt/emcomm/bin/emcomm`
+    - `/opt/emcomm/share/emcomm/{radios,ansible,bootstrap.sh}`
+    - depends on distro `python3` and `ansible-core`
+  - Metapackages that mix our packages with **version-floored distro packages** per family (spec §4.1). Debian floors resolve from backports through the pin.
+
+    | Toolset | Debian 13 | Fedora 43/44 |
+    |---|---|---|
+    | `emcomm-core` | cli, wfview (Task 28), flrig*, `libhamlib-utils (>= 4.7.2)` | cli, wfview, hamlib*, `flrig >= 2.0.12` |
+    | `emcomm-digital` | core, js8call, fldigi*, `wsjtx (>= 3.0.2)`, `flmsg (>= 4.0.23)`, `flamp (>= 2.2.14)` | core, js8call, `wsjtx >= 3.0.1`, `fldigi >= 4.2.13`, `flmsg >= 4.0.23`, `flamp >= 2.2.14` |
+    | `emcomm-winlink` | core, pat, `direwolf (>= 1.8.1)` | core, pat, `direwolf >= 1.8.1` |
+    | `emcomm-standard` | core + digital + winlink | same |
+
+    `*` = our build, which only exists for that family; `recipes_for_target` drops it elsewhere. Debian relations are written `pkg (>= v)` and rpm relations `pkg >= v`.
 
 - [ ] **Step 1: Create the CLI package recipe**
 
@@ -6848,20 +7410,20 @@ git commit -m "feat: emcomm bootstrap and pinned-key bootstrap.sh"
 ```yaml
 name: cli
 kind: app
-summary: emcommOS operator CLI, radio definitions and Ansible collection
+summary: emcommOS operator CLI, radio definitions, Ansible collection and bootstrap script
 license: Apache-2.0
 version: "0.1.0"
 release: 1
 source:
   type: local
-  paths: [cli, radios, ansible]
+  paths: [cli, radios, ansible, bootstrap.sh]
 deps:
   debian:
     build: [python3, python3-venv]
-    run: [python3, ansible-core]
+    run: [python3, ansible-core, python3-apt]        # apt module needs python3-apt
   fedora:
     build: [python3]
-    run: [python3, ansible-core]
+    run: [python3, ansible-core, python3-libdnf5]    # dnf5 module needs libdnf5 bindings
 ```
 
 `recipes/cli/build.sh`. The venv is created at its final path and then copied, so shebangs and `pyvenv.cfg` point at `/opt/emcomm`, never at DESTDIR:
@@ -6873,12 +7435,14 @@ venv=$PREFIX/lib/emcomm-cli
 rm -rf "$venv"
 python3 -m venv "$venv"
 "$venv/bin/pip" install --quiet --no-cache-dir "$SRC/cli"
-mkdir -p "$DESTDIR$PREFIX/lib" "$DESTDIR$PREFIX/bin" "$DESTDIR$PREFIX/share/emcomm"
+share=$DESTDIR$PREFIX/share/emcomm
+mkdir -p "$DESTDIR$PREFIX/lib" "$DESTDIR$PREFIX/bin" "$share"
 cp -a "$venv" "$DESTDIR$PREFIX/lib/"
 ln -s ../lib/emcomm-cli/bin/emcomm "$DESTDIR$PREFIX/bin/emcomm"
-cp -a "$SRC/radios" "$DESTDIR$PREFIX/share/emcomm/radios"
-cp -a "$SRC/ansible" "$DESTDIR$PREFIX/share/emcomm/ansible"
-find "$DESTDIR$PREFIX/share/emcomm/ansible" -type d -name molecule -prune -exec rm -rf {} +
+cp -a "$SRC/radios" "$share/radios"
+cp -a "$SRC/ansible" "$share/ansible"
+find "$share/ansible" -type d -name molecule -prune -exec rm -rf {} +
+install -m 0644 "$SRC/bootstrap.sh" "$share/bootstrap.sh"
 ```
 
 `recipes/cli/smoke.sh`:
@@ -6890,10 +7454,11 @@ emcomm --help >/dev/null
 emcomm radios | grep -q icom-ic7300
 test -f /opt/emcomm/share/emcomm/ansible/ansible_collections/emcomm/station/playbooks/station.yml
 test -s /opt/emcomm/share/emcomm/ansible/ansible_collections/emcomm/station/roles/base/files/emcomm-archive-keyring.asc
+grep -q '^EMCOMM_KEY_FINGERPRINT="[0-9A-F]\{40\}"$' /opt/emcomm/share/emcomm/bootstrap.sh
 ansible-playbook --version >/dev/null
 ```
 
-The `local` fetch copies with `shutil.copytree`, which follows symlinks, so the key symlink from Task 22 arrives as a real file.
+The `local` fetch follows symlinks (`shutil.copytree`), so Task 22's key symlink arrives as a real file. `bootstrap.sh` is copied as a single file (Task 5).
 
 - [ ] **Step 2: Create the metapackages**
 
@@ -6902,11 +7467,30 @@ The `local` fetch copies with `shutil.copytree`, which follows symlinks, so the 
 ```yaml
 name: core
 kind: meta
-summary: emcommOS core toolset (hamlib/rigctld hub, flrig, emcomm CLI)
+summary: emcommOS core toolset (rigctld hub, flrig, emcomm CLI)
 license: Apache-2.0
 version: "1.0.0"
 release: 1
-requires: [hamlib, flrig, cli]
+requires: [hamlib, flrig, cli]   # hamlib is Fedora-only, flrig Debian-only (see recipes)
+deps:
+  debian:
+    run: ["libhamlib-utils (>= 4.7.2)"]
+  fedora:
+    run: ["flrig >= 2.0.12"]
+```
+
+`recipes/core/smoke.sh`. Every radio definition must name a model the installed rigctld knows; this runs against Debian's backports hamlib and our Fedora build:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+rigctl=$(command -v /opt/emcomm/bin/rigctl || command -v rigctl)
+[[ $("$rigctl" -m 1 f) == 145000000 ]]
+models=$("$rigctl" -l | awk 'NR > 1 {print $1}')
+for f in /opt/emcomm/share/emcomm/radios/*.yaml; do
+  m=$(awk '/^hamlib_model:/ {print $2}' "$f")
+  grep -qx "$m" <<<"$models" || { echo "$f: hamlib model $m not in rigctl -l"; exit 1; }
+done
 ```
 
 `recipes/digital/recipe.yaml`:
@@ -6918,7 +7502,12 @@ summary: emcommOS digital modes toolset (WSJT-X, JS8Call, fldigi, flmsg, flamp)
 license: Apache-2.0
 version: "1.0.0"
 release: 1
-requires: [core, wsjtx, js8call, fldigi, flmsg, flamp]
+requires: [core, js8call, fldigi]   # fldigi recipe is Debian-only
+deps:
+  debian:
+    run: ["wsjtx (>= 3.0.2)", "flmsg (>= 4.0.23)", "flamp (>= 2.2.14)"]
+  fedora:
+    run: ["wsjtx >= 3.0.1", "fldigi >= 4.2.13", "flmsg >= 4.0.23", "flamp >= 2.2.14"]
 ```
 
 `recipes/winlink/recipe.yaml`:
@@ -6930,7 +7519,12 @@ summary: emcommOS Winlink/packet toolset (Pat, Direwolf)
 license: Apache-2.0
 version: "1.0.0"
 release: 1
-requires: [core, direwolf, pat]
+requires: [core, pat]
+deps:
+  debian:
+    run: ["direwolf (>= 1.8.1)"]
+  fedora:
+    run: ["direwolf >= 1.8.1"]
 ```
 
 `recipes/standard/recipe.yaml`:
@@ -6945,22 +7539,24 @@ release: 1
 requires: [core, digital, winlink]
 ```
 
-- [ ] **Step 3: Build everything for one target and install the default set**
+- [ ] **Step 3: Build everything per target and install the default set**
 
 Run: `uv run --directory tools emcomm-build validate`
-Expected: `ok: 3 targets, 15 recipes` (Task 28 adds wfview, making 16).
+Expected: `ok: 3 targets, 11 recipes`. Task 28 adds wfview, making 12.
 
 Run: `uv run --directory tools emcomm-build build --target debian-13`
-Expected: every package builds and the output ends with `smoke OK`.
+Expected: base, fldigi, flrig, js8call, pat, cli, and the metas build (no hamlib), and the output ends with `smoke OK`. The `core` smoke proves the backports pin resolved hamlib 4.7.2 and that every radio model exists.
 
 Run: `uv run --directory tools emcomm-build build --target fedora-44`
-Expected: `smoke OK`.
+Expected: base, hamlib, js8call, pat, cli, and the metas build (no fldigi/flrig), and the output ends with `smoke OK`.
+
+If a distro floor isn't satisfiable (for example a distro update renamed a package), run `emcomm-build freshness` and adjust the meta's `deps`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add recipes/cli recipes/core recipes/digital recipes/winlink recipes/standard
-git commit -m "feat(recipes): emcomm-cli package and toolset metapackages"
+git commit -m "feat(recipes): emcomm-cli package and per-family toolset metapackages"
 ```
 
 ---
@@ -7214,8 +7810,11 @@ git commit -m "ci: tests, multi-arch package builds, signed publishing to R2, up
 
 ```bash
 #!/usr/bin/env bash
-# M1 acceptance: from a pristine container, bootstrap the repo (pinned key), install
-# emcomm-core, prove the rigctld hub answers, and render a WSJT-X config via `emcomm use`.
+# M1 acceptance in a pristine container:
+#   1. bootstrap.sh installs the CLI (pinned key), and emcomm bootstrap applies the playbook;
+#   2. the rigctld hub answers through emcomm-run (distro or emcomm-built rigctld);
+#   3. emcomm use renders WSJT-X.ini managed keys and keeps the user's own;
+#   4. uninstall removes every emcomm package, repo file, pin, unit and /etc/emcomm.
 # Usage: repo-install.sh <target> <repo-url> [channel]
 set -euo pipefail
 target=$1
@@ -7232,17 +7831,20 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 podman run --rm -v "$root:/emcomm:ro,z" -e URL="$url" -e CHANNEL="$channel" "$image" bash -euo pipefail -c '
   if command -v apt-get >/dev/null; then
     apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
-    install_pkg() { apt-get install -y -qq "$@" >/dev/null; }
+    leftovers() { dpkg-query -W -f="\${db:Status-Abbrev}\${Package}\n" "emcomm-*" 2>/dev/null | grep "^ii" || true; }
   else
-    install_pkg() { dnf -y -q install "$@"; }
+    leftovers() { rpm -qa "emcomm-*"; }
   fi
-  sh /emcomm/bootstrap.sh --repo-url "$URL" --channel "$CHANNEL" --no-provision
-  install_pkg emcomm-core
+  sh /emcomm/bootstrap.sh --repo-url "$URL" --channel "$CHANNEL" --no-provision --yes
+  emcomm bootstrap --repo-url "$URL" --channel "$CHANNEL" --toolsets core --yes \
+    --set emcomm_chrony_enable=false
   export PATH=/opt/emcomm/bin:$PATH
 
-  rigctld -m 1 -T 127.0.0.1 -t 4532 &
+  /opt/emcomm/libexec/emcomm-run rigctld -m 1 -T 127.0.0.1 -t 4532 &
+  hub=$!
   for _ in $(seq 40); do rigctl -m 2 -r 127.0.0.1:4532 f >/dev/null 2>&1 && break; sleep 0.25; done
   test "$(rigctl -m 2 -r 127.0.0.1:4532 f)" = 145000000
+  kill $hub
 
   emcomm operator add K7TST --grid DN16bk
   emcomm station add bench --radio generic-vox --no-udev
@@ -7254,6 +7856,13 @@ podman run --rm -v "$root:/emcomm:ro,z" -e URL="$url" -e CHANNEL="$channel" "$im
   grep -qx "Rig=Hamlib NET rigctl" ~/.config/WSJT-X.ini
   grep -qx "CATNetworkPort=127.0.0.1:4532" ~/.config/WSJT-X.ini
   grep -qx "Font=Keep Me" ~/.config/WSJT-X.ini
+
+  sh /emcomm/bootstrap.sh --uninstall --yes
+  test -z "$(leftovers)"
+  ! ls /etc/apt/sources.list.d/emcomm* /etc/apt/preferences.d/emcomm* /etc/yum.repos.d/emcomm* 2>/dev/null
+  test ! -e /etc/emcomm
+  ! ls /etc/systemd/user/emcomm-* 2>/dev/null
+  grep -qx "Font=Keep Me" ~/.config/WSJT-X.ini   # user files untouched by uninstall
   echo "M1 acceptance OK"
 '
 ```
@@ -7265,8 +7874,10 @@ Run `chmod +x tests/integration/repo-install.sh`.
 ```markdown
 # M1 manual hardware checks
 
-Run on a real Debian 13 and a real Fedora laptop after `sudo sh bootstrap.sh --repo-url URL`.
-Record results (pass/fail, distro, radio, notes) in the PR that closes M1.
+Run on a real Debian 13 and a real Fedora machine after `sudo sh bootstrap.sh --repo-url URL`.
+Record results (pass/fail, distro, **machine model** from
+`cat /sys/class/dmi/id/product_name`, radio, notes) in the PR that closes M1. Run the USB
+checks (2–3, 11) when you have physical access to a radio; the LAN checks (12–13) do not need it.
 
 1. **Bootstrap**: `emcomm status` works; `id` shows `dialout` and `audio`; log out/in once.
 2. **Detection**: plug in the radio; `emcomm station detect` lists its serial port and sound card.
@@ -7354,7 +7965,7 @@ git commit -m "test: M1 acceptance script, manual hardware checklist, README"
 ### Task 28: wfview and the Icom IC-7300MK2
 
 **Files:**
-- Create: `recipes/wfview/{recipe.yaml,build.sh,smoke.sh}`, `radios/icom-ic7300mk2.yaml`, `cli/src/emcomm/render/wfview.py`
+- Create: `recipes/wfview/{recipe.yaml,build.sh,smoke.sh}`, `radios/icom-ic7300mk2.yaml`, `cli/src/emcomm/render/wfview.py`, `cli/src/emcomm/render/pipewire.py`
 - Modify:
   - `recipes/core/recipe.yaml` (add `wfview` to `requires`, `release: 2`)
   - `cli/src/emcomm/schemas/station.schema.json` (add `control`)
@@ -7366,7 +7977,7 @@ git commit -m "test: M1 acceptance script, manual hardware checklist, README"
   - `cli/src/emcomm/commands/use.py` (exposure warning)
   - `ansible/.../roles/radio_hw/templates/station.toml.j2` (`control`)
   - `docs/testing/m1-manual-checks.md`
-- Test: `cli/tests/test_wfview.py`; extend `cli/tests/test_ansible_station_template.py`
+- Test: `cli/tests/test_wfview.py`, `cli/tests/test_lan_station.py`; extend `cli/tests/test_ansible_station_template.py`
 
 **Design (from upstream research):**
 - wfview v2.23 is the latest stable, from gitlab.com/eliggett/wfview (tags `vX.YY`). It builds with qmake against Qt6 and links only system libraries on Linux. The IC-7300MK2 rig file first shipped in v2.22. Debian 13 ships 2.03 and Fedora ships 1.64, so we build our own.
@@ -7617,6 +8228,171 @@ control = "{{ item.control }}"
 {% endif %}
 ```
 
+- [ ] **Step 6b: LAN kits with PipeWire virtual audio**
+
+This is the setup you use today: the IC-7300MK2 reached over Ethernet by wfview, with no USB cable. wfview on Linux does not create audio devices, so emcomm creates a virtual pair per kit using PipeWire null sinks:
+- `emcomm-<kit>-rx`: wfview plays the radio's RX audio into it, and the apps record from its monitor.
+- `emcomm-<kit>-tx`: the apps play TX audio into it, and wfview records from its monitor.
+
+Write the failing tests in `cli/tests/test_lan_station.py`:
+
+```python
+import tomllib
+
+from emcomm.apply import plan_changes
+from emcomm.cli import main
+from emcomm.models import Operator, RadioDef, Station
+from emcomm.render.context import RenderContext
+from emcomm.render.pipewire import render_pipewire
+from emcomm.render.qtini import wsjtx_values
+
+MK2 = RadioDef(id="icom-ic7300mk2", vendor="Icom", model="IC-7300MK2", hamlib_model=3094,
+               baud=115200, ptt="cat")
+LAN = Station(name="mk2", radio="icom-ic7300mk2", control="wfview", virtual_audio=True)
+CTX = RenderContext(Operator("K7ABC", grid="DN16bk"), LAN, MK2)
+
+
+def test_pipewire_dropin():
+    text = render_pipewire(None, CTX)
+    assert 'node.name        = "emcomm-mk2-rx"' in text
+    assert 'node.name        = "emcomm-mk2-tx"' in text
+    assert text.count("support.null-audio-sink") == 2
+    usb = RenderContext(CTX.operator, Station(name="b", radio="x"), MK2)
+    assert render_pipewire(None, usb) is None
+
+
+def test_qt_apps_use_virtual_devices():
+    v = wsjtx_values(CTX)
+    assert v["SoundInName"] == '"emcomm-mk2-rx.monitor"'
+    assert v["SoundOutName"] == '"emcomm-mk2-tx"'
+
+
+def test_plan_writes_per_kit_dropin(paths):
+    paths_changes = {c.app: c.path for c in plan_changes(paths, CTX)}
+    assert paths_changes["pipewire"] == paths.home / ".config/pipewire/pipewire.conf.d/60-emcomm-mk2.conf"
+    assert "direwolf" not in paths_changes  # no ALSA card for LAN kits in M1
+
+
+def test_add_lan_station(paths, capsys):
+    assert main(["station", "add", "mk2", "--radio", "icom-ic7300mk2", "--control", "wfview",
+                 "--virtual-audio", "--no-udev"], paths=paths) == 0
+    data = tomllib.loads((paths.stations_dir / "mk2.toml").read_text())
+    assert data["control"] == "wfview" and data["virtual_audio"] is True
+    assert "warning" not in capsys.readouterr().out
+```
+
+Run: `uv run --directory cli pytest -q tests/test_lan_station.py`
+Expected: FAIL (`Station` has no `virtual_audio`; `emcomm.render.pipewire` is missing).
+
+Implement:
+
+1. In `station.schema.json`, add to `properties`: `"virtual_audio": {"type": "boolean"}`.
+2. In `models.py`, add to `Station`: `virtual_audio: bool = False`, plus:
+
+   ```python
+       @property
+       def rx_sink(self) -> str:
+           return f"emcomm-{self.name}-rx"
+
+       @property
+       def tx_sink(self) -> str:
+           return f"emcomm-{self.name}-tx"
+   ```
+
+3. In `profiles.py`: `station_to_dict` adds `data["virtual_audio"] = True` when set, and `station_from_dict` passes `virtual_audio=data.get("virtual_audio", False)`.
+4. In `render/context.py`, add to `RenderContext`:
+
+   ```python
+       @property
+       def sound_in(self) -> str | None:
+           if self.station.virtual_audio:
+               return f"{self.station.rx_sink}.monitor"
+           return self.alsa_device
+
+       @property
+       def sound_out(self) -> str | None:
+           if self.station.virtual_audio:
+               return self.station.tx_sink
+           return self.alsa_device
+   ```
+
+5. In `render/qtini.py`, replace the `if ctx.alsa_device:` block with:
+
+   ```python
+       if ctx.sound_in:
+           values["SoundInName"] = f'"{ctx.sound_in}"'
+       if ctx.sound_out:
+           values["SoundOutName"] = f'"{ctx.sound_out}"'
+   ```
+
+6. Create `render/pipewire.py`:
+
+   ```python
+   """Per-kit PipeWire virtual devices for LAN stations (wfview has no Linux audio devices)."""
+
+   from __future__ import annotations
+
+   from .context import RenderContext
+
+   NODE = """    {{ factory = adapter
+         args = {{
+           factory.name     = support.null-audio-sink
+           node.name        = "{name}"
+           node.description = "{description}"
+           media.class      = Audio/Sink
+           audio.position   = [ MONO ]
+           object.linger    = true
+           monitor.channel-volumes = true
+         }}
+       }}"""
+
+
+   def render_pipewire(existing: str | None, ctx: RenderContext) -> str | None:
+       st = ctx.station
+       if not st.virtual_audio:
+           return None
+       rx = NODE.format(name=st.rx_sink, description=f"emcomm {st.name} RX (radio audio from wfview)")
+       tx = NODE.format(name=st.tx_sink, description=f"emcomm {st.name} TX (app audio to wfview)")
+       return (f"# Managed by emcomm: virtual audio for LAN station {st.name}.\n"
+               f"context.objects = [\n{rx}\n{tx}\n]\n")
+   ```
+
+7. In `apply.py`, let `relpath` contain `{station}`. In `plan_changes` use `path = paths.home / cfg.relpath.format(station=ctx.station.name)`, and register the renderer:
+
+   ```python
+       AppConfig("pipewire", ".config/pipewire/pipewire.conf.d/60-emcomm-{station}.conf",
+                 render_pipewire),
+   ```
+
+8. In `commands/station.py`:
+   - Add `add.add_argument("--virtual-audio", action="store_true", help="LAN kit: create PipeWire virtual RX/TX devices")` and pass `virtual_audio=args.virtual_audio` to `Station(...)`.
+   - Skip the "no CAT serial port found" warning when `args.control == "wfview"`.
+9. In `commands/use.py`, after the wfview warning:
+
+   ```python
+       if station.virtual_audio:
+           print(f"note: restart PipeWire to create the virtual devices "
+                 f"(systemctl --user restart pipewire pipewire-pulse wireplumber). In wfview, set "
+                 f"audio output to '{station.rx_sink}' and input to 'Monitor of {station.tx_sink}'.",
+                 file=sys.stderr)
+   ```
+
+10. In `roles/radio_hw/templates/station.toml.j2`, after the `control` block:
+
+    ```
+    {% if item.virtual_audio | default(false) %}
+    virtual_audio = true
+    {% endif %}
+    ```
+
+11. Append a note to `radios/icom-ic7300mk2.yaml` `notes`:
+    `"LAN (no USB): sudo emcomm station add mk2 --radio icom-ic7300mk2 --control wfview --virtual-audio; connect wfview to the radio's IP"`
+
+Run: `uv run --directory cli pytest -q && uv run --directory cli ruff check .`
+Expected: PASS.
+
+Qt's PulseAudio device naming (`<sink>.monitor` / `<sink>`) under PipeWire is unverified. Manual check 12 confirms what WSJT-X and JS8Call actually list, and the renderer gets adjusted if needed.
+
 - [ ] **Step 7: Create the wfview recipe**
 
 `recipes/wfview/recipe.yaml`:
@@ -7687,7 +8463,7 @@ In `recipes/core/recipe.yaml`, set `requires: [hamlib, flrig, wfview, cli]` and 
 - [ ] **Step 8: Run tests, build, smoke**
 
 Run: `uv run --directory cli pytest -q && uv run --directory cli ruff check . && uv run --directory tools emcomm-build validate`
-Expected: PASS and `ok: 3 targets, 16 recipes`.
+Expected: PASS and `ok: 3 targets, 12 recipes`.
 
 Run: `uv run --directory tools emcomm-build build --target debian-13 --only wfview --only core && uv run --directory tools emcomm-build build --target fedora-44 --only wfview --only core`
 Expected: `smoke OK` twice. If linking fails with undefined `QCustomPlot` symbols, run `ldconfig -p | grep -i qcustomplot` inside the build container and add that library name to the loop in `build.sh`.
@@ -7703,8 +8479,11 @@ Expected: `smoke OK`, which confirms hamlib knows model 3094.
     in the PR so `radios/icom-ic7300mk2.yaml` can gain `usb_hints`.
     `sudo emcomm station add mk2 --radio icom-ic7300mk2 --cat ttyACM0 --audio cardN`;
     repeat checks 3–5 (rigctld uses hamlib model 3094).
-12. **IC-7300MK2 via wfview**: `sudo emcomm station add mk2w --radio icom-ic7300mk2
-    --cat ttyACM0 --audio cardN --control wfview`; `emcomm use <CALL> --station mk2w`;
+12. **IC-7300MK2 over LAN via wfview (primary setup today)**: `sudo emcomm station add mk2
+    --radio icom-ic7300mk2 --control wfview --virtual-audio`; `emcomm use <CALL> --station mk2`;
+    restart PipeWire; in wfview connect to the radio's IP and set audio out/in to the
+    emcomm virtual devices; record the exact device names WSJT-X and JS8Call list.
+    For a USB-attached MK2 instead: `--cat ttyACM0 --audio cardN --control wfview`;
     start wfview, pick the radio's port, confirm waterfall; then
     `systemctl --user restart emcomm-rigctld` and repeat check 4 (frequency/PTT through
     127.0.0.1:4532 → wfview 4533) and check 5 (WSJT-X CAT/PTT while wfview shows the TX).
@@ -7717,5 +8496,73 @@ Expected: `smoke OK`, which confirms hamlib knows model 3094.
 
 ```bash
 git add recipes/wfview recipes/core radios/icom-ic7300mk2.yaml cli ansible docs/testing
-git commit -m "feat: wfview 2.23 package, IC-7300MK2 definition, wfview-controlled stations"
+git commit -m "feat: wfview 2.23, IC-7300MK2, wfview-controlled and LAN stations with virtual audio"
+```
+
+---
+
+### Task 29: Nix flake dev shell (pinned contributor tooling)
+
+**Files:**
+- Create: `flake.nix`, `flake.lock` (generated)
+- Modify: `README.md` (Develop section)
+
+**Interfaces:**
+- Produces: `nix develop`, which gives every contributor the same pinned versions of `uv`, Python 3.12, `nfpm`, `shellcheck`, `actionlint`, `gnupg`, `rclone`, `git`, and `jq`. Podman comes from the host because rootless podman needs host setuid helpers. Ansible/Molecule come from `ansible/requirements-dev.txt` in a venv, matching CI. Tier-2 app outputs come in M2 (spec §4.5).
+
+- [ ] **Step 1: Create `flake.nix`**
+
+```nix
+{
+  description = "emcommOS development shell (pinned tooling)";
+
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+
+  outputs = { self, nixpkgs }:
+    let
+      systems = [ "x86_64-linux" "aarch64-linux" ];
+      forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+    in
+    {
+      devShells = forAll (pkgs: {
+        default = pkgs.mkShell {
+          packages = with pkgs; [ python312 uv nfpm shellcheck actionlint gnupg rclone git jq ];
+          shellHook = ''
+            export UV_PYTHON=${pkgs.python312}/bin/python3
+            command -v podman >/dev/null || echo "note: install podman from your distro for package builds"
+          '';
+        };
+      });
+    };
+}
+```
+
+- [ ] **Step 2: Lock and check it**
+
+If Nix is installed: `nix flake lock && nix flake check && nix develop -c nfpm --version`.
+
+Without Nix, use a container:
+
+```bash
+podman run --rm -v "$PWD:/src:z" -w /src docker.io/nixos/nix sh -c \
+  "nix --extra-experimental-features 'nix-command flakes' flake lock && \
+   nix --extra-experimental-features 'nix-command flakes' develop -c nfpm --version"
+```
+
+Expected: `flake.lock` is created and nfpm prints its version.
+
+- [ ] **Step 3: Document it**
+
+Add this as the first bullet of README.md's "Develop" section:
+
+```markdown
+- Tooling: `nix develop` gives pinned uv/python/nfpm/shellcheck/actionlint/gnupg/rclone
+  (optional; otherwise install them yourself). Podman comes from your distro.
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add flake.nix flake.lock README.md
+git commit -m "build: Nix flake dev shell with pinned contributor tooling"
 ```
