@@ -57,3 +57,23 @@ def test_build_hello(hello_repo, tmp_path, target, libc):
     destdir, deps = run_build(Engine(), recipe, tgt, hello_repo, workdir)
     assert (destdir / "opt/emcomm/bin/hello").is_file()
     assert libc in deps
+
+
+SCRIPT_BUILD = """\
+set -euo pipefail
+mkdir -p "$DESTDIR$PREFIX/bin"
+printf '#!/bin/sh\\necho hi\\n' > "$DESTDIR$PREFIX/bin/hi"
+chmod +x "$DESTDIR$PREFIX/bin/hi"
+"""
+
+
+def test_build_script_only_has_no_runtime_deps(hello_repo, tmp_path):
+    write_recipe(hello_repo, "hi", HELLO_RECIPE.replace("name: hello", "name: hi"),
+                 build_sh=SCRIPT_BUILD)
+    recipe = load_recipes(hello_repo)["hi"]
+    tgt = load_targets(hello_repo)["debian-13"]
+    workdir = tmp_path / "work" / "hi"
+    (workdir / "src").mkdir(parents=True)
+    destdir, deps = run_build(Engine(), recipe, tgt, hello_repo, workdir)
+    assert (destdir / "opt/emcomm/bin/hi").is_file()
+    assert deps == []

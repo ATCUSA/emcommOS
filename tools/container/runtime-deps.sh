@@ -3,6 +3,23 @@
 # Libraries under /opt/emcomm (our own packages) and unresolved libraries are skipped;
 # the smoke test catches anything left unresolved after installation.
 set -euo pipefail
+
+# Turn dpkg -S / rpm output into one bare package name per line. dpkg lists several
+# owners as "libfoo1:amd64, libbar2:amd64: /path"; emit each separately without :arch.
+normalize() {
+  sed -E 's|: /.*$||' | tr ',' '\n' | sed -E 's/^ +//; s/ +$//; s/:[a-z0-9]+$//' |
+    sed -E '/^$/d' | { grep -v '^emcomm-' || true; } | sort -u
+}
+
+if [[ ${1:-} == --normalize ]]; then
+  normalize
+  exit 0
+fi
+
+if ! command -v file >/dev/null || ! command -v ldd >/dev/null; then
+  echo "runtime-deps.sh: need file and ldd" >&2
+  exit 1
+fi
 root=$1
 declare -A libs=()
 
@@ -30,4 +47,4 @@ owner() {
 for lib in "${!libs[@]}"; do
   case "$lib" in /opt/emcomm/*) continue ;; esac
   owner "$lib"
-done | sed -E 's/^([^:, ]+)(:[a-z0-9]+)?: .*/\1/' | grep -v '^emcomm-' | sort -u
+done | normalize

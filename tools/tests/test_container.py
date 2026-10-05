@@ -45,3 +45,26 @@ def test_run_build_reads_runtime_deps(tmp_path):
     assert destdir == tmp_path / "destdir"
     assert destdir.is_dir()
     assert deps == ["libc6", "libusb-1.0-0"]
+
+
+def test_run_build_raises_without_runtime_deps(tmp_path):
+    import pytest
+
+    def fake_run(cmd, check):
+        return subprocess.CompletedProcess(cmd, 0)
+
+    with pytest.raises(RuntimeError, match="runtime-deps.txt"):
+        run_build(Engine(), RECIPE, TARGET, Path("/repo"), tmp_path, run=fake_run)
+
+
+def test_runtime_deps_normalize_multi_owner():
+    script = Path(__file__).resolve().parents[1] / "container" / "runtime-deps.sh"
+    out = subprocess.run(
+        ["bash", str(script), "--normalize"], check=True, capture_output=True, text=True,
+        input="libfoo1:amd64, libbar2:amd64: /usr/lib/x.so\nlibc6:amd64: /lib/libc.so.6\n"
+              "emcomm-base: /opt/x\nglibc\n",
+    ).stdout
+    assert out.split() == ["glibc", "libbar2", "libc6", "libfoo1"]
+    empty = subprocess.run(["bash", str(script), "--normalize"], check=True,
+                           capture_output=True, text=True, input="")
+    assert empty.stdout == ""

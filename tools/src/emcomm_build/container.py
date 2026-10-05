@@ -74,7 +74,9 @@ def run_build(
     deps_file.unlink(missing_ok=True)
     write_repo_files(target, workdir / "repos")
     run(build_command(engine, recipe, target, root, workdir), check=True)
-    runtime = []
-    if deps_file.exists():
-        runtime = [line.strip() for line in deps_file.read_text().splitlines() if line.strip()]
+    if not deps_file.exists():
+        raise RuntimeError(
+            f"container build for {recipe.name} on {target.name} did not write {deps_file}"
+        )
+    runtime = [line.strip() for line in deps_file.read_text().splitlines() if line.strip()]
     return destdir, runtime
