@@ -1,6 +1,6 @@
 from conftest import app, write_recipe
 
-from emcomm_build.bump import bump, dependents, set_version
+from emcomm_build.bump import bump, bump_order, dependents, set_version
 from emcomm_build.model import load_recipes
 
 ASSET_RECIPE = """\
@@ -77,3 +77,32 @@ def test_bump_resets_release_and_increments_dependents(fake_repo):
     recipes = load_recipes(fake_repo)
     assert (recipes["hamlib"].version, recipes["hamlib"].release) == ("4.7.2", 1)
     assert recipes["wsjtx"].release == 3
+
+
+def test_bump_order_sorts_by_dependency(fake_repo):
+    write_recipe(fake_repo, "hamlib", app("hamlib"))
+    write_recipe(fake_repo, "wsjtx", app("wsjtx", depends_on="[hamlib]"))
+    recipes = load_recipes(fake_repo)
+    # wsjtx depends on hamlib, so hamlib should come first
+    assert bump_order(recipes, ["wsjtx", "hamlib"]) == ["hamlib", "wsjtx"]
+
+
+def test_bump_order_end_to_end(fake_repo):
+    (fake_repo / "recipes" / "hamlib").mkdir(parents=True)
+    (fake_repo / "recipes" / "hamlib" / "recipe.yaml").write_text(ASSET_RECIPE + "  sha256: " + "c" * 64 + "\n")
+    (fake_repo / "recipes" / "hamlib" / "build.sh").write_text("")
+    write_recipe(fake_repo, "wsjtx", app("wsjtx", depends_on="[hamlib]", version="1.0.0", release=1))
+
+    def fake_sha(url):
+        return "e" * 64
+
+    # Bump both in the given order (reversed)
+    recipes = load_recipes(fake_repo)
+    ordered = bump_order(recipes, ["wsjtx", "hamlib"])
+    assert ordered == ["hamlib", "wsjtx"]
+    # Bump hamlib first
+    bump(fake_repo, "hamlib", "4.7.2", sha_for=fake_sha)
+    # Bump wsjtx next
+    bump(fake_repo, "wsjtx", "1.1.0", sha_for=fake_sha)
+    recipes = load_recipes(fake_repo)
+    assert (recipes["wsjtx"].version, recipes["wsjtx"].release) == ("1.1.0", 1)

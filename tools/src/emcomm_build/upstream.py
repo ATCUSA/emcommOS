@@ -21,9 +21,16 @@ def is_newer(candidate: str, current: str) -> bool:
 
 
 def pick_latest(tags: Iterable[str], pattern: str) -> str | None:
-    """Return the highest version among tags that fully match pattern (group 1 = version)."""
+    r"""Return the highest version among tags that fully match pattern (group 1 = version).
+
+    Excludes release candidates and pre-release versions that don't match \d+(\.\d+)*.
+    """
     rx = re.compile(pattern)
-    versions = [m.group(1) for t in tags if (m := rx.fullmatch(t))]
+    versions = [
+        m.group(1)
+        for t in tags
+        if (m := rx.fullmatch(t)) and re.fullmatch(r"\d+(\.\d+)*", m.group(1))
+    ]
     return max(versions, key=version_key, default=None)
 
 

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
+import urllib.error
 
-from .bump import bump
+from .bump import bump, bump_order
 from .model import DefinitionError, load_recipes, load_targets, repo_root
 from .upstream import is_newer, list_tags, pick_latest
 
@@ -22,19 +24,33 @@ def cmd_check(args: argparse.Namespace) -> int:
     root = repo_root()
     recipes = load_recipes(root)
     updates = []
+    failed = False
     for r in recipes.values():
         if r.upstream is None:
             continue
-        latest = pick_latest(list_tags(r.upstream), r.upstream.tag_pattern)
-        if latest and is_newer(latest, r.version):
-            updates.append((r.name, r.version, latest))
+        try:
+            latest = pick_latest(list_tags(r.upstream), r.upstream.tag_pattern)
+            if latest and is_newer(latest, r.version):
+                updates.append((r.name, r.version, latest))
+        except (urllib.error.URLError, TimeoutError, subprocess.CalledProcessError, OSError) as exc:
+            print(f"error: {r.name}: {exc}", file=sys.stderr)
+            failed = True
     for name, old, new in updates:
         print(f"{name}: {old} -> {new}")
-        if args.write:
-            print(f"  bumped: {', '.join(bump(root, name, new))}")
-    if not updates:
+    if args.write and updates:
+        # Bump in order so dependencies are processed first
+        ordered_names = bump_order(recipes, [name for name, _, _ in updates])
+        update_dict = {name: new for name, _, new in updates}
+        for name in ordered_names:
+            new_version = update_dict[name]
+            try:
+                print(f"  bumped: {', '.join(bump(root, name, new_version))}")
+            except (urllib.error.URLError, TimeoutError, subprocess.CalledProcessError, OSError, DefinitionError) as exc:
+                print(f"error: {name}: {exc}", file=sys.stderr)
+                failed = True
+    if not updates and not failed:
         print("all recipes are current")
-    return 0
+    return 1 if failed else 0
 
 
 def cmd_bump(args: argparse.Namespace) -> int:

@@ -52,3 +52,8 @@ def test_list_tags_git():
 
     up = Upstream(type="git-tags", tag_pattern=r"v(.*)", url="https://git.code.sf.net/p/fldigi/fldigi")
     assert list_tags(up, run=fake_run) == ["v4.2.12", "v4.2.13"]
+
+
+def test_pick_latest_excludes_release_candidates():
+    tags = ["v2.7.0", "v2.7.1-rc1"]
+    assert pick_latest(tags, r"v(.*)") == "2.7.0"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import urllib.error
 from collections.abc import Callable
 from pathlib import Path
 
@@ -55,6 +56,22 @@ def dependents(recipes: dict[str, Recipe], name: str) -> list[str]:
     return sorted(found)
 
 
+def _longest_depends_chain(recipes: dict[str, Recipe], name: str) -> int:
+    """Compute the longest chain of depends_on edges from this recipe."""
+    r = recipes.get(name)
+    if not r or not r.depends_on:
+        return 0
+    return 1 + max((_longest_depends_chain(recipes, dep) for dep in r.depends_on), default=0)
+
+
+def bump_order(recipes: dict[str, Recipe], names: list[str]) -> list[str]:
+    """Sort names so a recipe precedes recipes that depend_on it.
+
+    Sort by depth (longest depends_on chain) ascending, then name.
+    """
+    return sorted(names, key=lambda n: (_longest_depends_chain(recipes, n), n))
+
+
 def bump(
     root: Path, name: str, version: str, *, sha_for: Callable[[str], str] = download_sha256
 ) -> list[str]:
@@ -62,15 +79,26 @@ def bump(
     raw = yaml.safe_load(path.read_text())
     src = raw.get("source", {})
     sha = None
-    if src.get("type") == "github-release-asset":
-        sha = sha_for(asset_url(src["repo"], src.get("ref", "{version}"), src["asset"], version))
-    elif src.get("type") == "arch-url":
-        lines = []
-        for arch in sorted(src["urls"]):
-            url = src["urls"][arch].format(version=version)
-            lines.append(f"{sha_for(url)}  {url.rsplit('/', 1)[-1]}")
-        (path.parent / "SHA256SUMS").write_text("\n".join(lines) + "\n")
+    sums_text = None
+
+    # Compute all checksums BEFORE writing anything
+    try:
+        if src.get("type") == "github-release-asset":
+            url = asset_url(src["repo"], src.get("ref", "{version}"), src["asset"], version)
+            sha = sha_for(url)
+        elif src.get("type") == "arch-url":
+            lines = []
+            for arch in sorted(src["urls"]):
+                url = src["urls"][arch].format(version=version)
+                lines.append(f"{sha_for(url)}  {url.rsplit('/', 1)[-1]}")
+            sums_text = "\n".join(lines) + "\n"
+    except (urllib.error.URLError, OSError) as exc:
+        raise DefinitionError(f"{name}: download failed: {exc}") from exc
+
+    # Now write everything
     set_version(path, version, sha)
+    if sums_text is not None:
+        (path.parent / "SHA256SUMS").write_text(sums_text)
     deps = dependents(load_recipes(root), name)
     for dep in deps:
         increment_release(root / "recipes" / dep / "recipe.yaml")
