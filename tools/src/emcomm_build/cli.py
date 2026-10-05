@@ -16,6 +16,7 @@ from .container import engine_from_env
 from .fetch import FetchError
 from .model import DefinitionError, load_recipes, load_targets, repo_root
 from .plan import build_order, recipes_for_target
+from .publish import publish
 from .upstream import is_newer, list_tags, pick_latest
 
 
@@ -111,6 +112,16 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_publish(args: argparse.Namespace) -> int:
+    root = repo_root()
+    publish(root, Path(args.dist), Path(args.repo_dir), load_targets(root),
+            Path(args.key_file), Path(args.passphrase_file),
+            Path(args.public_key) if args.public_key else root / "keys/emcomm-archive-keyring.asc",
+            engine=engine_from_env())
+    print(f"published {args.repo_dir}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="emcomm-build", description="emcommOS package builder")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -135,6 +146,13 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--force", action="store_true", help="rebuild even if already published")
     b.add_argument("--no-smoke", action="store_true")
     b.set_defaults(func=cmd_build)
+    pub = sub.add_parser("publish", help="add built packages to a channel tree and sign it")
+    pub.add_argument("--dist", required=True, help="dir laid out as <target>/<arch>/*.pkg")
+    pub.add_argument("--repo-dir", required=True, help="local copy of the channel tree")
+    pub.add_argument("--key-file", required=True, help="armored secret signing (sub)key")
+    pub.add_argument("--passphrase-file", required=True, help="file with the key passphrase")
+    pub.add_argument("--public-key", help="default keys/emcomm-archive-keyring.asc")
+    pub.set_defaults(func=cmd_publish)
     return parser
 
 
