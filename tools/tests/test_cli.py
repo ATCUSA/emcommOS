@@ -47,3 +47,34 @@ def test_cmd_check_continues_on_list_tags_failure(fake_repo, monkeypatch, capsys
     # Check stderr output
     captured = capsys.readouterr()
     assert "error:" in captured.err
+
+
+def _build_args(**kw):
+    base = {"target": "debian-13", "arch": None, "out": None, "work": None, "repo_url": None,
+            "channel": "testing", "only": [], "force": False, "no_smoke": True}
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def test_cmd_build_only_filters_by_target(fake_repo, monkeypatch, capsys):
+    import pytest
+
+    from emcomm_build import cli
+    from emcomm_build.model import DefinitionError
+
+    write_recipe(fake_repo, "hamlib", app("hamlib"))
+    write_recipe(fake_repo, "fedonly", app("fedonly") + "    families: [fedora]\n")
+    monkeypatch.setattr(cli, "repo_root", lambda: fake_repo)
+    monkeypatch.setattr(cli, "host_arch", lambda: "amd64")
+    seen = []
+    monkeypatch.setattr(cli, "run_builds", lambda s: seen.append(s.only) or [])
+
+    assert cli.cmd_build(_build_args(only=["fedonly"])) == 0
+    assert "skipping fedonly: not built for debian-13" in capsys.readouterr().out
+    assert seen == []
+
+    assert cli.cmd_build(_build_args(only=["fedonly", "hamlib"])) == 0
+    assert seen == [("hamlib",)]
+
+    with pytest.raises(DefinitionError, match="unknown recipe"):
+        cli.cmd_build(_build_args(only=["nope"]))
