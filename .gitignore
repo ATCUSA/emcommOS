@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.deb
+*.rpm
+*.pkg.tar.zst
