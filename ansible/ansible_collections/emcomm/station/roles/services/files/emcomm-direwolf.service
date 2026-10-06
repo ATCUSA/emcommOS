@@ -1,5 +1,5 @@
 [Unit]
-Description=emcommOS Dire Wolf soundcard modem/TNC (AGW 8000, KISS 8001)
+Description=emcommOS Dire Wolf soundcard modem/TNC (AGW 8000; KISS TCP off)
 Wants=emcomm-rigctld.service
 After=emcomm-rigctld.service
 
