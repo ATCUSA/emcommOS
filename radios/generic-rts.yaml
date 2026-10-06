@@ -1,0 +1,14 @@
+id: generic-rts
+vendor: Generic
+model: Serial RTS PTT (e.g. Digirig without CAT)
+hamlib_model: 1
+baud: 9600
+ptt: rts
+usb_hints:
+  cat:
+    - {vendor_id: "10c4", product_id: "ea60"}
+  audio:
+    - {vendor_id: "0d8c", product_id: "0012"}
+    - {vendor_id: "0d8c", product_id: "013c"}
+notes:
+  - "PTT is keyed by RTS on the interface's serial port; frequency control is not available."

@@ -1,0 +1,10 @@
+id: kenwood-ts590sg
+vendor: Kenwood
+model: TS-590SG
+hamlib_model: 2037
+baud: 115200
+ptt: cat
+notes:
+  - "Set the USB COM port speed to 115200 in the radio's menu"
+  - "Select USB audio as the DATA mode audio input"
+  - "No USB hints yet: pick the CAT port and sound card with --cat/--audio"

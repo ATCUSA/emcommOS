@@ -1,0 +1,17 @@
+id: icom-ic7300
+vendor: Icom
+model: IC-7300
+hamlib_model: 3073
+baud: 19200
+ptt: cat
+usb_hints:
+  cat:
+    - {vendor_id: "10c4", product_id: "ea60", serial_prefix: "IC-7300"}
+  audio:
+    - {vendor_id: "08bb", product_id: "2901"}
+notes:
+  - "MENU > SET > Connectors > CI-V > CI-V USB Baud Rate: 19200"
+  - "MENU > SET > Connectors > CI-V > CI-V USB Echo Back: OFF"
+  - "MENU > SET > Connectors > CI-V > CI-V USB Port: Unlink from [REMOTE]"
+  - "MENU > SET > Connectors > DATA MOD: USB"
+  - "Start USB MOD Level near 50% and adjust for minimal ALC on transmit"

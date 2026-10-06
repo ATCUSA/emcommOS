@@ -1,0 +1,16 @@
+id: icom-ic705
+vendor: Icom
+model: IC-705
+hamlib_model: 3085
+baud: 19200
+ptt: cat
+usb_hints:
+  cat:
+    - {product_contains: "IC-705", interface: "00"}
+  audio:
+    - {vendor_id: "08bb", product_id: "2901"}
+notes:
+  - "MENU > SET > Connectors > CI-V > CI-V USB Baud Rate: 19200"
+  - "MENU > SET > Connectors > CI-V > CI-V USB Echo Back: OFF"
+  - "MENU > SET > Connectors > MOD Input > DATA MOD: USB"
+  - "The second USB serial port (interface 02) carries GPS NMEA, not CAT"

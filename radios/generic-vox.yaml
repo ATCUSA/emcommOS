@@ -1,0 +1,8 @@
+id: generic-vox
+vendor: Generic
+model: VOX (audio only)
+hamlib_model: 1
+baud: 9600
+ptt: vox
+notes:
+  - "Enable VOX on the radio or interface. rigctld runs hamlib's dummy rig so apps still have a CAT endpoint."

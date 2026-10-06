@@ -1,0 +1,17 @@
+id: yaesu-ft991a
+vendor: Yaesu
+model: FT-991A
+hamlib_model: 1035
+baud: 38400
+ptt: cat
+usb_hints:
+  cat:
+    - {vendor_id: "10c4", product_id: "ea70", interface: "00"}
+  audio:
+    - {vendor_id: "08bb", product_id: "29b3"}
+notes:
+  - "CAT RATE: 38400"
+  - "CAT RTS: DISABLE"
+  - "DATA PORT SELECT: USB"
+  - "Use the Enhanced COM port (interface 00) for CAT; the Standard port is for PTT/keying"
+  - "Operate digital modes in DATA-U"
