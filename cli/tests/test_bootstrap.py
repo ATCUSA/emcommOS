@@ -74,3 +74,13 @@ def test_bootstrap_sh_pins_project_fingerprint():
     fpr = (REPO / "keys/fingerprint.txt").read_text().strip()
     script = (REPO / "bootstrap.sh").read_text()
     assert re.search(rf'^EMCOMM_KEY_FINGERPRINT="{fpr}"$', script, re.MULTILINE)
+
+
+def test_bootstrap_vars_reject_insecure_url_and_bad_channel():
+    import pytest
+
+    from emcomm.validation import ProfileError
+    with pytest.raises(ProfileError, match="non-HTTPS"):
+        bs.bootstrap_vars("http://r", "testing", "core", [], {})
+    with pytest.raises(ProfileError, match="channel"):
+        bs.bootstrap_vars("https://r", "te/st", "core", [], {})

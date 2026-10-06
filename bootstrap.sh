@@ -38,6 +38,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 REPO_URL=${REPO_URL%/}
+case $CHANNEL in ''|*[!a-z0-9._-]*) die "invalid channel '$CHANNEL' (allowed: a-z 0-9 . _ -)" ;; esac
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
 # shellcheck source=/dev/null
@@ -48,24 +49,67 @@ case " ${ID_LIKE:-} $ID " in
   *) die "unsupported distribution '$ID' (M1 supports Debian 13 and Fedora)" ;;
 esac
 
+# Print the packages (one per line) that removing "$@" would also take with it.
+plan_debian() {
+  apt-get -s remove --purge --auto-remove "$@" | awk '/^(Remv|Purg) / {print $2}' | sort -u
+}
+plan_fedora() {
+  dnf remove --assumeno "$@" 2>&1 | awk '
+    /^Transaction Summary/ {insec=0}
+    insec && /^ +[^ ]/ && $1 !~ /:$/ {print $1}
+    /^Removing/ {insec=1}' | sort -u
+}
+
+# Refuse when the removal would take out a package the user installed themselves.
+check_plan() {
+  manual=$1; shift
+  for p in "$@"; do
+    case $p in emcomm-*) continue ;; esac
+    if printf '%s\n' "$manual" | grep -qx "$p"; then
+      echo "bootstrap: removing emcomm would also remove '$p', which you installed yourself." >&2
+      echo "  Remove '$p' first (it depends on emcomm), then re-run the uninstall." >&2
+      echo "  Nothing was changed." >&2
+      exit 1
+    fi
+  done
+}
+
 uninstall() {
-  echo "emcommOS uninstall will remove: emcomm packages (and dependencies only they needed),"
-  echo "  the emcommOS repository and key, the backports source and pin, emcomm user units,"
-  echo "  emcomm udev rules and /etc/emcomm. Your files in ~/.config and app settings are kept."
-  confirm "Remove emcommOS?"
+  echo "emcommOS uninstall will remove:"
+  echo "  - the emcomm-* packages and any dependencies that only they needed (listed below)"
+  echo "  - the emcommOS repository and signing key, and the Debian backports source and pin"
+  echo "  - emcomm user units and udev rules, and /etc/emcomm (including your station kits)"
+  echo "Your files in ~/.config and app settings are kept; group memberships and chrony stay."
   if [ "$FAMILY" = debian ]; then
     pkgs=$(dpkg-query -W -f='${db:Status-Abbrev}${Package}\n' 'emcomm-*' 2>/dev/null \
-           | awk '/^ii/ {print substr($0, 4)}')
+           | awk '/^(ii|hi|rc)/ {print substr($0, 4)}' | tr -d ' ')
     if [ -n "$pkgs" ]; then
       # shellcheck disable=SC2086
-      apt-get remove -y $pkgs
-      apt-get autoremove -y
+      plan=$(plan_debian $pkgs)
+      echo "Packages that will be removed (purged):"; echo "$plan" | sed 's/^/    /'
+      # shellcheck disable=SC2086
+      check_plan "$(apt-mark showmanual)" $plan
+    fi
+  else
+    pkgs=$(rpm -qa --qf '%{NAME}\n' 'emcomm-*')
+    if [ -n "$pkgs" ]; then
+      # shellcheck disable=SC2086
+      plan=$(plan_fedora $pkgs)
+      echo "Packages that will be removed:"; echo "$plan" | sed 's/^/    /'
+      # shellcheck disable=SC2086
+      check_plan "$(dnf -q repoquery --userinstalled --qf '%{name}\n' 2>/dev/null)" $plan
+    fi
+  fi
+  confirm "Remove emcommOS?"
+  if [ "$FAMILY" = debian ]; then
+    if [ -n "$pkgs" ]; then
+      # shellcheck disable=SC2086
+      apt-get remove --purge --auto-remove -y $pkgs
     fi
     rm -f /etc/apt/sources.list.d/emcomm.sources /etc/apt/sources.list.d/emcomm-backports.sources \
           /etc/apt/preferences.d/emcomm-backports.pref /usr/share/keyrings/emcomm-archive-keyring.asc
     apt-get update -qq || true
   else
-    pkgs=$(rpm -qa --qf '%{NAME}\n' 'emcomm-*')
     if [ -n "$pkgs" ]; then
       # shellcheck disable=SC2086
       dnf -y remove $pkgs
@@ -84,6 +128,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
 fi
 
 [ -n "$REPO_URL" ] || die "set EMCOMM_REPO_URL or pass --repo-url"
+case $REPO_URL in https://*|file://*) ;; *) die "refusing non-HTTPS repository URL: $REPO_URL" ;; esac
 echo "emcommOS bootstrap will:"
 echo "  - trust the emcommOS signing key $EMCOMM_KEY_FINGERPRINT"
 echo "  - add the package repository $REPO_URL/$CHANNEL"
@@ -102,14 +147,20 @@ fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "$REPO_URL/$CHANNEL/emcomm-archive-keyring.asc" -o "$tmp/key.asc"
-fpr=$(GNUPGHOME="$tmp" gpg --batch --show-keys --with-colons "$tmp/key.asc" \
-      | awk -F: '/^fpr/ {print $10; exit}')
+curl -fsSL --proto '=https,file' "$REPO_URL/$CHANNEL/emcomm-archive-keyring.asc" -o "$tmp/key.asc"
+keys=$(GNUPGHOME="$tmp" gpg --batch --show-keys --with-colons "$tmp/key.asc")
+npub=$(printf '%s\n' "$keys" | grep -c '^pub:' || true)
+[ "$npub" -eq 1 ] ||
+  die "the repository key file contains $npub keys; exactly one is allowed. Refusing to trust it."
+fpr=$(printf '%s\n' "$keys" | awk -F: '/^fpr/ {print $10; exit}')
 [ "$fpr" = "$EMCOMM_KEY_FINGERPRINT" ] ||
   die "repository key $fpr does not match the pinned emcommOS key $EMCOMM_KEY_FINGERPRINT"
+# Install only a re-export of the pinned key, never the downloaded file itself.
+GNUPGHOME="$tmp" gpg --batch --import "$tmp/key.asc" 2>/dev/null
+GNUPGHOME="$tmp" gpg --batch --armor --export "$EMCOMM_KEY_FINGERPRINT" > "$tmp/pinned.asc"
 
 if [ "$FAMILY" = debian ]; then
-  install -m 0644 "$tmp/key.asc" /usr/share/keyrings/emcomm-archive-keyring.asc
+  install -m 0644 "$tmp/pinned.asc" /usr/share/keyrings/emcomm-archive-keyring.asc
   cat > /etc/apt/sources.list.d/emcomm.sources <<EOF
 Types: deb
 URIs: $REPO_URL/$CHANNEL/deb
@@ -120,7 +171,7 @@ EOF
   apt-get update -qq
   apt-get install -y emcomm-cli
 else
-  install -m 0644 "$tmp/key.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
+  install -m 0644 "$tmp/pinned.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
   cat > "/etc/yum.repos.d/emcomm-$CHANNEL.repo" <<EOF
 [emcomm-$CHANNEL]
 name=emcommOS $CHANNEL

@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -46,6 +47,10 @@ def parse_overrides(items: list[str]) -> dict:
 
 def bootstrap_vars(repo_url: str, channel: str, toolsets: str, users: list[str],
                    overrides: dict) -> dict:
+    if not repo_url.startswith(("https://", "file://")):
+        raise ProfileError(f"refusing non-HTTPS repository URL: {repo_url}")
+    if not re.fullmatch(r"[a-z0-9._-]+", channel):
+        raise ProfileError(f"invalid channel {channel!r} (allowed: a-z 0-9 . _ -)")
     return {
         "emcomm_repo_url": repo_url.rstrip("/"),
         "emcomm_channel": channel,
