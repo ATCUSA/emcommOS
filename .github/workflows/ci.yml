@@ -9,6 +9,33 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  release-bump:
+    # emcomm-cli packages cli/, ansible/, radios/ and bootstrap.sh: a PR that changes them must
+    # bump recipes/cli/recipe.yaml's release, or the published package would not update.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: emcomm-cli release bumped when its inputs change
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "$BASE_SHA...HEAD")
+          if ! printf '%s\n' "$changed" | grep -Eq '^(cli/|ansible/|radios/|bootstrap\.sh$)'; then
+            echo "no emcomm-cli inputs changed"
+            exit 0
+          fi
+          if git diff -U0 "$BASE_SHA...HEAD" -- recipes/cli/recipe.yaml | grep -Eq '^\+release:'; then
+            echo "emcomm-cli release bumped"
+            exit 0
+          fi
+          echo "::error file=recipes/cli/recipe.yaml::cli/, ansible/, radios/ or bootstrap.sh changed; bump 'release:' in recipes/cli/recipe.yaml"
+          exit 1
   python:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
