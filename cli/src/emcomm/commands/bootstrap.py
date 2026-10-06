@@ -15,6 +15,11 @@ from ..paths import Paths
 from ..validation import ProfileError
 
 PLAYBOOK = "ansible_collections/emcomm/station/playbooks/station.yml"
+POST_INSTALL_NOTE = (
+    "Done. emcomm user units were installed; as each radio user, run once:\n"
+    "  systemctl --user daemon-reload\n"
+    "(or log out and back in) so systemd sees them; then pick a station with 'emcomm use'."
+)
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -55,6 +60,12 @@ def bootstrap_vars(repo_url: str, channel: str, toolsets: str, users: list[str],
         **overrides,
     }
     url, chan = data["emcomm_repo_url"], data["emcomm_channel"]
+    toolsets = data["emcomm_toolsets"]
+    if not isinstance(toolsets, list) or not toolsets:
+        raise ProfileError("emcomm_toolsets must be a non-empty list of toolset names")
+    for name in toolsets:
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9-]+", name):
+            raise ProfileError(f"invalid toolset name {name!r} (allowed: a-z 0-9 -)")
     if not isinstance(url, str) or not url.startswith(("https://", "file://")):
         raise ProfileError(f"refusing non-HTTPS repository URL: {url}")
     if not re.fullmatch(r"[A-Za-z0-9._~:/%@+-]+", url):
@@ -114,4 +125,6 @@ def cmd_bootstrap(args: argparse.Namespace, paths: Paths) -> int:
         env = {**os.environ, "ANSIBLE_COLLECTIONS_PATH": str(paths.ansible_dir)}
         result = subprocess.run(playbook_command(paths, vars_file, args.check), env=env,
                                 check=False)
+    if result.returncode == 0 and not args.check:
+        print(POST_INSTALL_NOTE)
     return result.returncode

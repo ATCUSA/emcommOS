@@ -107,3 +107,27 @@ def test_overrides_cannot_bypass_validation():
         bs.bootstrap_vars("https://r", "testing", "core", [], {"emcomm_channel": ".."})
     with pytest.raises(ProfileError):
         bs.bootstrap_vars("https://r\nx", "testing", "core", [], {})
+
+
+def test_toolset_names_validated_after_overrides():
+    import pytest
+    from emcomm.validation import ProfileError
+    for bad in ("core;rm", "Core", "../x", "a b"):
+        with pytest.raises(ProfileError, match="invalid toolset name"):
+            bs.bootstrap_vars("https://r", "testing", bad, [], {})
+    with pytest.raises(ProfileError, match="invalid toolset name"):
+        bs.bootstrap_vars("https://r", "testing", "core", [], {"emcomm_toolsets": ["ok", "x/y"]})
+    with pytest.raises(ProfileError, match="non-empty list"):
+        bs.bootstrap_vars("https://r", "testing", "core", [], {"emcomm_toolsets": "core"})
+    with pytest.raises(ProfileError, match="non-empty list"):
+        bs.bootstrap_vars("https://r", "testing", ",", [], {})
+    assert bs.bootstrap_vars("https://r", "testing", " core , ham-2 ", [], {})[
+        "emcomm_toolsets"] == ["core", "ham-2"]
+
+
+def test_bootstrap_prints_daemon_reload_note(paths, monkeypatch, capsys):
+    monkeypatch.setattr(bs.subprocess, "run",
+                        lambda cmd, env, check: subprocess.CompletedProcess(cmd, 0))
+    monkeypatch.setattr(bs.os, "geteuid", lambda: 0)
+    assert main(["bootstrap", "--repo-url", "https://r", "--yes"], paths=paths) == 0
+    assert "systemctl --user daemon-reload" in capsys.readouterr().out
