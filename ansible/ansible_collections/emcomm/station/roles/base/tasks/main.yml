@@ -10,6 +10,28 @@
       Other distributions (Ubuntu, Mint, EL, Arch) arrive in M2.
       Nothing was changed on this machine.
 
+- name: Look up operator accounts
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ item }}"
+    fail_key: false
+  loop: "{{ emcomm_users }}"
+  register: emcomm_user_lookup
+
+- name: Find missing operator accounts
+  ansible.builtin.set_fact:
+    emcomm_missing_users: >-
+      {{ emcomm_user_lookup.results
+         | map(attribute='ansible_facts.getent_passwd') | map('dict2items') | map('first')
+         | selectattr('value', 'none') | map(attribute='key') | list }}
+
+- name: Fail on missing operator accounts
+  ansible.builtin.fail:
+    msg: >-
+      emcomm will not create accounts; create it or fix emcomm_users.
+      Missing: {{ emcomm_missing_users | join(', ') }}
+  when: emcomm_missing_users | length > 0
+
 - name: Load OS family variables
   ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
@@ -34,21 +56,6 @@
     name: "{{ item }}"
     system: true
   loop: "{{ emcomm_radio_groups }}"
-
-- name: Look up operator accounts
-  ansible.builtin.getent:
-    database: passwd
-    key: "{{ item }}"
-    fail_key: false
-  loop: "{{ emcomm_users }}"
-  register: emcomm_user_lookup
-
-- name: Fail on missing operator accounts
-  ansible.builtin.fail:
-    msg: >-
-      emcomm will not create accounts; create it or fix emcomm_users.
-      Missing: {{ emcomm_user_lookup.results | selectattr('ansible_facts.getent_passwd', 'none') | map(attribute='item') | list | join(', ') }}
-  when: emcomm_user_lookup.results | selectattr('ansible_facts.getent_passwd', 'none') | list | length > 0
 
 - name: Add operators to radio groups
   ansible.builtin.user:
