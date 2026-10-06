@@ -111,6 +111,7 @@ def test_overrides_cannot_bypass_validation():
 
 def test_toolset_names_validated_after_overrides():
     import pytest
+
     from emcomm.validation import ProfileError
     for bad in ("core;rm", "Core", "../x", "a b"):
         with pytest.raises(ProfileError, match="invalid toolset name"):
