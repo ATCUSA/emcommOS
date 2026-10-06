@@ -18,7 +18,7 @@
       "properties": {
         "vendor_id": {"type": "string", "pattern": "\\A[0-9a-f]{4}\\Z"},
         "product_id": {"type": "string", "pattern": "\\A[0-9a-f]{4}\\Z"},
-        "serial": {"type": "string", "pattern": "\\A[^\"\\\\\\x00-\\x1f\\x7f]*\\Z"},
+        "serial": {"type": "string", "pattern": "\\A[^\"\\\\*?\\[\\]|\\x00-\\x1f\\x7f]*\\Z"},
         "interface": {"type": "string", "pattern": "\\A[0-9a-f]{2}\\Z"}
       }
     }

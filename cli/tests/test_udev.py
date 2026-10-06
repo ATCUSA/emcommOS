@@ -1,5 +1,11 @@
+import subprocess
+
+import pytest
+
+from emcomm import udev
 from emcomm.models import RadioDef, Station, UsbMatch
 from emcomm.udev import apply_udev, render_rules, udev_env_value
+from emcomm.validation import ProfileError
 
 IC7300 = RadioDef(id="icom-ic7300", vendor="Icom", model="IC-7300", hamlib_model=3073,
                   baud=19200, ptt="cat")
@@ -11,6 +17,8 @@ KIT = Station(name="kita", radio="icom-ic7300",
 def test_env_value_matches_udev_escaping():
     assert udev_env_value("IC-7300 03001234 A") == "IC-7300_03001234_A"
     assert udev_env_value("a/b") == "a_b"
+    assert udev_env_value("IC-7300  0300 A") == "IC-7300_0300_A"
+    assert udev_env_value("  x y ") == "x_y"
 
 
 def test_render_rules():
@@ -50,3 +58,38 @@ def test_apply_writes_and_prunes(paths):
     assert not stale.exists() and other.exists()
     assert calls == []  # not the real /etc/udev/rules.d, so no udevadm
     assert apply_udev(paths, [KIT], {"icom-ic7300": IC7300}, run=calls.append) is False
+
+
+RADIOS = {"icom-ic7300": IC7300}
+
+
+def test_root_path_reloads_and_triggers(paths, monkeypatch):
+    monkeypatch.setattr(udev, "SYSTEM_RULES", paths.udev_rules)
+    calls = []
+    run = lambda cmd, **kw: calls.append((cmd, kw))
+    assert apply_udev(paths, [KIT], RADIOS, run=run) is True
+    assert calls == [
+        (["udevadm", "control", "--reload"], {"check": True}),
+        (["udevadm", "trigger", "--action=add", "--subsystem-match=tty",
+          "--subsystem-match=sound", "--subsystem-match=usb"], {"check": True}),
+    ]
+    calls.clear()
+    assert apply_udev(paths, [KIT], RADIOS, run=run) is False
+    assert calls == []
+
+
+@pytest.mark.parametrize("exc", [subprocess.CalledProcessError(1, "udevadm"),
+                                 FileNotFoundError("udevadm")])
+def test_udevadm_failure_is_profile_error(paths, monkeypatch, exc):
+    monkeypatch.setattr(udev, "SYSTEM_RULES", paths.udev_rules)
+
+    def run(cmd, **kw):
+        raise exc
+
+    with pytest.raises(ProfileError, match="udevadm failed.*written to.*manually"):
+        apply_udev(paths, [KIT], RADIOS, run=run)
+
+
+def test_unknown_radio_is_profile_error(paths):
+    with pytest.raises(ProfileError, match="kita.*icom-ic7300"):
+        apply_udev(paths, [KIT], {}, run=lambda *a, **k: None)

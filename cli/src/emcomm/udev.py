@@ -1,6 +1,6 @@
 """Generate udev rules giving each station kit stable device names.
 
-Rules are numbered 70 so ENV{ID_*} from 60-persistent-serial.rules is available and
+Rules are numbered 70 so ENV{ID_*} from 60-serial.rules is available and
 ID_MM_DEVICE_IGNORE is set before ModemManager's 77/80 rules probe the port.
 """
 
@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .models import RadioDef, Station, UsbMatch
 from .paths import Paths
+from .validation import ProfileError
 
 SYSTEM_RULES = Path("/etc/udev/rules.d")
 UDEV_UNSAFE = re.compile(r"[^A-Za-z0-9#+\-.:=@_]")
@@ -20,7 +21,7 @@ UDEV_UNSAFE = re.compile(r"[^A-Za-z0-9#+\-.:=@_]")
 
 def udev_env_value(value: str) -> str:
     """Mirror how udev's usb_id sanitizes strings into ID_* properties."""
-    return UDEV_UNSAFE.sub("_", value.strip())
+    return UDEV_UNSAFE.sub("_", re.sub(r"\s+", "_", value.strip()))
 
 
 def rules_path(paths: Paths, station: Station) -> Path:
@@ -72,6 +73,9 @@ def apply_udev(
     *,
     run: Callable = subprocess.run,
 ) -> bool:
+    for st in stations:
+        if st.radio not in radios:
+            raise ProfileError(f"station {st.name!r} references unknown radio {st.radio!r}")
     paths.udev_rules.mkdir(parents=True, exist_ok=True)
     changed = False
     wanted = set()
@@ -87,7 +91,13 @@ def apply_udev(
             path.unlink()
             changed = True
     if changed and paths.udev_rules == SYSTEM_RULES:
-        run(["udevadm", "control", "--reload"], check=True)
-        run(["udevadm", "trigger", "--action=add", "--subsystem-match=tty",
-             "--subsystem-match=sound"], check=True)
+        try:
+            run(["udevadm", "control", "--reload"], check=True)
+            run(["udevadm", "trigger", "--action=add", "--subsystem-match=tty",
+                 "--subsystem-match=sound", "--subsystem-match=usb"], check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise ProfileError(
+                f"udevadm failed: {exc}; rules were written to {paths.udev_rules}; run "
+                "`sudo udevadm control --reload && sudo udevadm trigger` manually"
+            ) from exc
     return changed

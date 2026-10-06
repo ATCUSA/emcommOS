@@ -64,3 +64,11 @@ def test_station_name_8_char_accepts():
     """Station name with 8 characters should be accepted."""
     data = {"name": "kit-abcd", "radio": "test"}
     validate("station", data, "test")
+
+
+@pytest.mark.parametrize("serial", ["ABC*", "A[1]", "A?B", "A|B"])
+def test_serial_rejects_udev_glob_chars(serial):
+    data = {"name": "kit-a", "radio": "test",
+            "cat": {"vendor_id": "10c4", "product_id": "ea60", "serial": serial}}
+    with pytest.raises(ProfileError):
+        validate("station", data, "test")
