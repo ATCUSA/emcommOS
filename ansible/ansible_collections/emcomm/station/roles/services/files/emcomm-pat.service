@@ -1,0 +1,12 @@
+[Unit]
+Description=emcommOS Pat Winlink client (web UI on localhost:8080)
+Wants=emcomm-rigctld.service
+After=emcomm-rigctld.service
+
+[Service]
+ExecStart=/opt/emcomm/libexec/emcomm-run pat http
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

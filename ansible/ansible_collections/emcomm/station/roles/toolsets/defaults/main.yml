@@ -1,0 +1,2 @@
+# emcomm toolsets to install (package emcomm-<name>). "standard" = core + digital + winlink.
+emcomm_toolsets: [standard]

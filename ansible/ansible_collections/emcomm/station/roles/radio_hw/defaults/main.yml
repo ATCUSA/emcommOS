@@ -1,0 +1,5 @@
+# Station kits for this machine, same fields as /etc/emcomm/stations/<name>.toml, e.g.
+# - {name: kita, radio: icom-ic7300,
+#    cat: {vendor_id: "10c4", product_id: "ea60", serial: "IC-7300 03001234 A", interface: "00"},
+#    audio: {vendor_id: "08bb", product_id: "2901"}}
+emcomm_stations: []

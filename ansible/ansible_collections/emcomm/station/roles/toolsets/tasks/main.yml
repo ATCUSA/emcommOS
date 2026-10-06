@@ -1,2 +1,5 @@
-- name: Placeholder until this role is implemented
-  ansible.builtin.meta: noop
+- name: Install emcommOS toolsets
+  ansible.builtin.package:
+    name: "{{ emcomm_toolsets | map('regex_replace', '^', 'emcomm-') | list }}"
+    state: present
+  when: emcomm_toolsets | length > 0

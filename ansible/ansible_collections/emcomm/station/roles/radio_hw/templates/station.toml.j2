@@ -1,0 +1,15 @@
+# Managed by Ansible (emcomm.station.radio_hw)
+name = "{{ item.name }}"
+radio = "{{ item.radio }}"
+{% if item.ptt is defined %}
+ptt = "{{ item.ptt }}"
+{% endif %}
+{% for section in ['cat', 'audio'] %}
+{% if item[section] is defined %}
+
+[{{ section }}]
+{% for key, value in item[section] | dictsort %}
+{{ key }} = "{{ value }}"
+{% endfor %}
+{% endif %}
+{% endfor %}

@@ -1,0 +1,12 @@
+[Unit]
+Description=emcommOS rigctld hub (127.0.0.1:4532)
+Documentation=man:rigctld(1)
+
+[Service]
+EnvironmentFile=%h/.config/emcomm/rigctld.env
+ExecStart=/opt/emcomm/libexec/emcomm-run rigctld $RIGCTLD_ARGS
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

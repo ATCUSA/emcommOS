@@ -1,0 +1,12 @@
+[Unit]
+Description=emcommOS Dire Wolf soundcard modem/TNC (AGW 8000, KISS 8001)
+Wants=emcomm-rigctld.service
+After=emcomm-rigctld.service
+
+[Service]
+ExecStart=/opt/emcomm/libexec/emcomm-run direwolf -t 0 -c %h/.config/emcomm/direwolf.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

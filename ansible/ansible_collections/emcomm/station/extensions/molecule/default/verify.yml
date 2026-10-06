@@ -79,3 +79,22 @@
         that:
           - "'dialout' in emcomm_groups.stdout.split()"
           - "'audio' in emcomm_groups.stdout.split()"
+
+    - name: Stat user units
+      ansible.builtin.stat:
+        path: "/etc/systemd/user/{{ item }}"
+      register: emcomm_units
+      loop: [emcomm-rigctld.service, emcomm-direwolf.service, emcomm-pat.service]
+
+    - name: User units are installed
+      ansible.builtin.assert:
+        that: emcomm_units.results | map(attribute='stat.exists') | list is all
+
+    - name: Station directory exists
+      ansible.builtin.stat:
+        path: /etc/emcomm/stations
+      register: emcomm_stations_dir
+
+    - name: Check station directory
+      ansible.builtin.assert:
+        that: emcomm_stations_dir.stat.isdir

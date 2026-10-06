@@ -1,2 +1,9 @@
-- name: Placeholder until this role is implemented
-  ansible.builtin.meta: noop
+- name: Install emcomm systemd user units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/user/{{ item }}"
+    mode: "0644"
+  loop:
+    - emcomm-rigctld.service
+    - emcomm-direwolf.service
+    - emcomm-pat.service

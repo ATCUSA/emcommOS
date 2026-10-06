@@ -1,2 +1,20 @@
-- name: Placeholder until this role is implemented
-  ansible.builtin.meta: noop
+- name: Create the station kit directory
+  ansible.builtin.file:
+    path: /etc/emcomm/stations
+    state: directory
+    mode: "0755"
+
+- name: Write station kits
+  ansible.builtin.template:
+    src: station.toml.j2
+    dest: "/etc/emcomm/stations/{{ item.name }}.toml"
+    mode: "0644"
+  loop: "{{ emcomm_stations }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Generate udev rules for station kits
+  ansible.builtin.command: /opt/emcomm/bin/emcomm station apply-udev
+  register: emcomm_udev
+  changed_when: "'udev: updated' in emcomm_udev.stdout"
+  when: emcomm_stations | length > 0
