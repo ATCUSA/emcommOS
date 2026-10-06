@@ -2,10 +2,13 @@
   ansible.builtin.assert:
     that:
       - emcomm_repo_url | length > 0
-      - ansible_os_family in ["Debian", "RedHat"]
+      - >-
+        (ansible_distribution == "Debian" and ansible_distribution_major_version | int >= 13)
+        or ansible_distribution == "Fedora"
     fail_msg: >-
-      Set emcomm_repo_url and run on a Debian- or Fedora-family system
-      (other distributions arrive in later milestones).
+      emcomm_repo_url must be set, and M1 supports only Debian 13+ and Fedora.
+      Other distributions (Ubuntu, Mint, EL, Arch) arrive in M2.
+      Nothing was changed on this machine.
 
 - name: Load OS family variables
   ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
@@ -32,9 +35,25 @@
     system: true
   loop: "{{ emcomm_radio_groups }}"
 
+- name: Look up operator accounts
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ item }}"
+    fail_key: false
+  loop: "{{ emcomm_users }}"
+  register: emcomm_user_lookup
+
+- name: Fail on missing operator accounts
+  ansible.builtin.fail:
+    msg: >-
+      emcomm will not create accounts; create it or fix emcomm_users.
+      Missing: {{ emcomm_user_lookup.results | selectattr('ansible_facts.getent_passwd', 'none') | map(attribute='item') | list | join(', ') }}
+  when: emcomm_user_lookup.results | selectattr('ansible_facts.getent_passwd', 'none') | list | length > 0
+
 - name: Add operators to radio groups
   ansible.builtin.user:
     name: "{{ item }}"
     groups: "{{ emcomm_radio_groups }}"
     append: true
+    create_home: false
   loop: "{{ emcomm_users }}"

@@ -13,6 +13,21 @@
         that:
           - "'URIs: https://repo.invalid/testing/deb' in (emcomm_sources.content | b64decode)"
           - "'Suites: debian-13' in (emcomm_sources.content | b64decode)"
+          - "'Signed-By: /usr/share/keyrings/emcomm-archive-keyring.asc' in (emcomm_sources.content | b64decode)"
+      when: ansible_os_family == "Debian"
+
+    - name: Stat the Debian key and backports source
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /usr/share/keyrings/emcomm-archive-keyring.asc
+        - /etc/apt/sources.list.d/emcomm-backports.sources
+      register: emcomm_deb_files
+      when: ansible_os_family == "Debian"
+
+    - name: Check the Debian key and backports source exist
+      ansible.builtin.assert:
+        that: emcomm_deb_files.results | map(attribute='stat.exists') | list is all
       when: ansible_os_family == "Debian"
 
     - name: Read the backports pin
@@ -39,6 +54,19 @@
         that:
           - "'rpm/fedora-$releasever/$basearch' in (emcomm_repo.content | b64decode)"
           - "'repo_gpgcheck = 1' in (emcomm_repo.content | b64decode)"
+          - "'\ngpgcheck = 1' in (emcomm_repo.content | b64decode)"
+          - "'gpgkey = file:///etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm' in (emcomm_repo.content | b64decode)"
+      when: ansible_os_family == "RedHat"
+
+    - name: Stat the RPM key
+      ansible.builtin.stat:
+        path: /etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
+      register: emcomm_rpm_key
+      when: ansible_os_family == "RedHat"
+
+    - name: Check the RPM key exists
+      ansible.builtin.assert:
+        that: emcomm_rpm_key.stat.exists
       when: ansible_os_family == "RedHat"
 
     - name: Read operator groups

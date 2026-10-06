@@ -1,5 +1,5 @@
 Types: deb
-URIs: {{ emcomm_repo_url }}/{{ emcomm_channel }}/deb
+URIs: {{ emcomm_repo_url | regex_replace('/+$', '') }}/{{ emcomm_channel }}/deb
 Suites: {{ ansible_distribution | lower }}-{{ ansible_distribution_major_version }}
 Components: main
 Signed-By: /usr/share/keyrings/emcomm-archive-keyring.asc

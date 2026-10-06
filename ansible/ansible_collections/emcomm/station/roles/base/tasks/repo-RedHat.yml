@@ -8,7 +8,7 @@
   ansible.builtin.yum_repository:
     name: "emcomm-{{ emcomm_channel }}"
     description: "emcommOS {{ emcomm_channel }}"
-    baseurl: "{{ emcomm_repo_url }}/{{ emcomm_channel }}/rpm/{{ ansible_distribution | lower }}-$releasever/$basearch"
+    baseurl: "{{ emcomm_repo_url | regex_replace('/+$', '') }}/{{ emcomm_channel }}/rpm/{{ ansible_distribution | lower }}-$releasever/$basearch"
     gpgcheck: true
     repo_gpgcheck: true
     gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
