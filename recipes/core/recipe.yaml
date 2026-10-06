@@ -1,0 +1,12 @@
+name: core
+kind: meta
+summary: emcommOS core toolset (rigctld hub, flrig, emcomm CLI)
+license: Apache-2.0
+version: "1.0.0"
+release: 1
+requires: [hamlib, flrig, cli]   # hamlib is Fedora-only, flrig Debian-only (see recipes)
+deps:
+  debian:
+    run: ["libhamlib-utils (>= 4.7.2)"]
+  fedora:
+    run: ["flrig >= 2.0.12"]

@@ -1,0 +1,16 @@
+name: cli
+kind: app
+summary: emcommOS operator CLI, radio definitions, Ansible collection and bootstrap script
+license: Apache-2.0
+version: "0.1.0"
+release: 1
+source:
+  type: local
+  paths: [cli, radios, ansible, bootstrap.sh]
+deps:
+  debian:
+    build: [python3, python3-venv]
+    run: [python3, ansible-core, python3-apt]        # apt module needs python3-apt
+  fedora:
+    build: [python3]
+    run: [python3, ansible-core, python3-libdnf5]    # dnf5 module needs libdnf5 bindings

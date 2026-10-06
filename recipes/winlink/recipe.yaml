@@ -1,0 +1,12 @@
+name: winlink
+kind: meta
+summary: emcommOS Winlink/packet toolset (Pat, Direwolf)
+license: Apache-2.0
+version: "1.0.0"
+release: 1
+requires: [core, pat]
+deps:
+  debian:
+    run: ["direwolf (>= 1.8.1)"]
+  fedora:
+    run: ["direwolf >= 1.8.1"]

@@ -1,0 +1,7 @@
+name: standard
+kind: meta
+summary: emcommOS opinionated default station (core + digital + winlink)
+license: Apache-2.0
+version: "1.0.0"
+release: 1
+requires: [core, digital, winlink]

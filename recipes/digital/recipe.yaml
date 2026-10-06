@@ -1,0 +1,12 @@
+name: digital
+kind: meta
+summary: emcommOS digital modes toolset (WSJT-X, JS8Call, fldigi, flmsg, flamp)
+license: Apache-2.0
+version: "1.0.0"
+release: 1
+requires: [core, js8call, fldigi]   # fldigi recipe is Debian-only
+deps:
+  debian:
+    run: ["wsjtx (>= 3.0.2)", "flmsg (>= 4.0.23)", "flamp (>= 2.2.14)"]
+  fedora:
+    run: ["wsjtx >= 3.0.1", "fldigi >= 4.2.13", "flmsg >= 4.0.23", "flamp >= 2.2.14"]
