@@ -46,12 +46,12 @@ def render_pat(existing: str | None, ctx: RenderContext) -> str:
         data = copy.deepcopy(PAT_DEFAULTS)
 
     if not isinstance(data, dict):
-        raise TypeError("pat config.json must be a JSON object")
+        raise ValueError("pat config.json must be a JSON object")  # noqa: TRY004
 
     # Validate managed sections are dicts if they exist
     for section_name in ("hamlib_rigs", "ardop", "varahf", "ax25"):
         if section_name in data and not isinstance(data[section_name], dict):
-            raise TypeError(f"pat config.json section '{section_name}' must be a JSON object")
+            raise ValueError(f"pat config.json section '{section_name}' must be a JSON object")
 
     data["mycall"] = ctx.operator.callsign
     if ctx.operator.grid:

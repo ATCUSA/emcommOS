@@ -79,19 +79,19 @@ def test_render_rigctld_rejects_forbidden_chars_in_set_conf(forbidden_char):
 
 def test_pat_rejects_non_dict_root():
     """Test that pat rejects JSON that isn't an object at root."""
-    with pytest.raises(TypeError, match="must be a JSON object"):
+    with pytest.raises(ValueError, match="must be a JSON object"):
         render_pat("[]", c(IC7300))
-    with pytest.raises(TypeError, match="must be a JSON object"):
+    with pytest.raises(ValueError, match="must be a JSON object"):
         render_pat("null", c(IC7300))
 
 
 def test_pat_rejects_non_dict_managed_section():
     """Test that pat rejects non-dict values in managed sections."""
     # ardop is null instead of dict
-    with pytest.raises(TypeError, match="ardop.*must be a JSON object"):
+    with pytest.raises(ValueError, match="ardop.*must be a JSON object"):
         render_pat(json.dumps({"ardop": None}), c(IC7300))
     # hamlib_rigs is null instead of dict
-    with pytest.raises(TypeError, match="hamlib_rigs.*must be a JSON object"):
+    with pytest.raises(ValueError, match="hamlib_rigs.*must be a JSON object"):
         render_pat(json.dumps({"hamlib_rigs": None}), c(IC7300))
 
 
