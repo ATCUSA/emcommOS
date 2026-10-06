@@ -21,6 +21,7 @@ from .render.fldigi import render_fldigi
 from .render.pat import render_pat
 from .render.qtini import render_wsjtx
 from .render.rigctld import render_rigctld
+from .validation import ProfileError
 
 Renderer = Callable[[str | None, RenderContext], str | None]
 
@@ -64,7 +65,8 @@ def plan_changes(paths: Paths, ctx: RenderContext) -> list[FileChange]:
     changes = []
     for cfg in APP_CONFIGS:
         path = paths.home / cfg.relpath
-        old = _read(path) if path.exists() else None
+        real = _real(path)
+        old = _read(real) if real.exists() else None
         new = cfg.render(old, ctx)
         if new is not None and new != old:
             changes.append(FileChange(cfg.app, path, old, new))
@@ -81,31 +83,82 @@ def render_diff(changes: list[FileChange], home: Path) -> str:
     return "".join(out)
 
 
-def apply_changes(paths: Paths, changes: list[FileChange], now: datetime) -> Path | None:
-    backup = paths.state / "backups" / now.strftime("%Y%m%dT%H%M%S")
-    for c in changes:
-        rel = c.path.relative_to(paths.home)
-        if c.old is not None:
-            dest = backup / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(c.path, dest)  # preserves mode
-            mode = c.path.stat().st_mode & 0o7777
-        else:
-            mode = 0o600 if rel.as_posix() in _PRIVATE_NEW else None
-        c.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = c.path.with_name(c.path.name + ".emcomm-tmp")
+def _real(path: Path) -> Path:
+    """Resolve a symlinked target to the file that really holds the content."""
+    if path.is_symlink():
+        if not path.exists():
+            raise ProfileError(f"{path} is a broken symlink; fix or remove it")
+        return path.resolve()
+    return path
+
+
+def _new_backup_dir(root: Path, now: datetime) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    base = now.strftime("%Y%m%dT%H%M%S.%f")
+    n = 0
+    while True:
+        candidate = root / (base if n == 0 else f"{base}-{n}")
+        try:
+            candidate.mkdir(exist_ok=False)
+        except FileExistsError:
+            n += 1
+            continue
+        return candidate
+
+
+def _write(real: Path, new: str, mode: int | None) -> None:
+    real.parent.mkdir(parents=True, exist_ok=True)
+    tmp = real.with_name(real.name + ".emcomm-tmp")
+    try:
         # Create private, then widen to the original/default mode: never more open than before.
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(c.new)
+            f.write(new)
         if mode is not None:
             os.chmod(tmp, mode)
         else:
             umask = os.umask(0)
             os.umask(umask)
             os.chmod(tmp, 0o666 & ~umask)
-        os.replace(tmp, c.path)
-    return backup if backup.exists() else None
+        os.replace(tmp, real)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def apply_changes(paths: Paths, changes: list[FileChange], now: datetime) -> Path | None:
+    targets = [(c, _real(c.path)) for c in changes]  # validates symlinks before any write
+    backup = _new_backup_dir(paths.state / "backups", now)
+    # Phase 1: back up everything first.
+    for c, real in targets:
+        if c.old is not None:
+            dest = backup / c.path.relative_to(paths.home)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(real, dest)  # preserves mode
+    # Phase 2: write.
+    written: list[Path] = []
+    for c, real in targets:
+        rel = c.path.relative_to(paths.home)
+        if c.old is not None:
+            mode = real.stat().st_mode & 0o7777
+        else:
+            mode = 0o600 if rel.as_posix() in _PRIVATE_NEW else None
+        try:
+            _write(real, c.new, mode)
+        except OSError as exc:
+            pending = [str(x.path) for x, _ in targets if x.path not in written
+                       and x.path != c.path]
+            raise ProfileError(
+                f"failed writing {c.path}: {exc}. "
+                f"already written: {', '.join(map(str, written)) or 'none'}; "
+                f"not written: {', '.join([str(c.path), *pending])}. "
+                f"Originals are in {backup}; restore by copying them back under {paths.home}."
+            ) from exc
+        written.append(c.path)
+    if any(backup.iterdir()):
+        return backup
+    backup.rmdir()
+    return None
 
 
 def save_active(paths: Paths, callsign: str, station: str) -> None:

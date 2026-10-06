@@ -23,6 +23,13 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=cmd_use)
 
 
+def _confirm() -> bool:
+    try:
+        return input("Apply these changes? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
 def cmd_use(args: argparse.Namespace, paths: Paths) -> int:
     operator = load_operator(paths, args.callsign)
     station = load_station(paths, args.station)
@@ -39,7 +46,7 @@ def cmd_use(args: argparse.Namespace, paths: Paths) -> int:
     print(render_diff(changes, paths.home), end="")
     if args.dry_run:
         return 0
-    if not args.yes and input("Apply these changes? [y/N] ").strip().lower() not in ("y", "yes"):
+    if not args.yes and not _confirm():
         print("aborted")
         return 1
     backup = apply_changes(paths, changes, datetime.now())  # noqa: DTZ005
