@@ -42,13 +42,37 @@ case $CHANNEL in ''|.|..|*[!a-z0-9._-]*) die "invalid channel '$CHANNEL' (allowe
 case $REPO_URL in *[!A-Za-z0-9._~:/%@+-]*) die "repository URL contains unsupported characters" ;; esac
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
+[ -r /etc/os-release ] || die "cannot read /etc/os-release; nothing was changed"
 # shellcheck source=/dev/null
 . /etc/os-release
-case " ${ID_LIKE:-} $ID " in
-  *" debian "*) FAMILY=debian ;;
-  *" fedora "*|*" rhel "*) FAMILY=fedora ;;
-  *) die "unsupported distribution '$ID' (M1 supports Debian 13 and Fedora)" ;;
-esac
+ID=${ID:-}; VERSION_ID=${VERSION_ID:-}
+
+# Install: only the distributions M1 supports (Debian 13+, Fedora), decided before any change.
+require_supported() {
+  ok=0
+  case $ID in
+    debian)
+      major=${VERSION_ID%%.*}
+      case $major in ''|*[!0-9]*) ;; *) [ "$major" -ge 13 ] && ok=1 ;; esac ;;
+    fedora) ok=1 ;;
+  esac
+  [ "$ok" -eq 1 ] ||
+    die "unsupported distribution '${ID:-unknown}${VERSION_ID:+ $VERSION_ID}'; M1 supports Debian 13+ and Fedora; nothing was changed"
+  FAMILY=$ID
+}
+
+# Uninstall: work wherever our files can exist (derivatives included), by package tooling.
+uninstall_family() {
+  case " ${ID_LIKE:-} $ID " in
+    *" debian "*) FAMILY=debian ;;
+    *" fedora "*|*" rhel "*) FAMILY=fedora ;;
+    *)
+      if command -v dpkg-query >/dev/null 2>&1; then FAMILY=debian
+      elif command -v rpm >/dev/null 2>&1 && command -v dnf >/dev/null 2>&1; then FAMILY=fedora
+      else die "cannot tell how packages are managed on '${ID:-unknown}'; nothing was changed"
+      fi ;;
+  esac
+}
 
 in_set() { printf '%s\n' "$2" | grep -Fqx -- "$1"; }
 # set_diff "A" "B": lines of A not in B.
@@ -169,10 +193,12 @@ uninstall() {
 }
 
 if [ "$UNINSTALL" -eq 1 ]; then
+  uninstall_family
   uninstall
   exit 0
 fi
 
+require_supported
 [ -n "$REPO_URL" ] || die "set EMCOMM_REPO_URL or pass --repo-url"
 case $REPO_URL in https://*|file://*) ;; *) die "refusing non-HTTPS repository URL: $REPO_URL" ;; esac
 echo "emcommOS bootstrap will:"

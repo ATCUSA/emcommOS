@@ -13,6 +13,20 @@ mkdir -p /repo/testing /g && chmod 700 /g
 GNUPGHOME=/g gpg --batch --passphrase "" --quick-gen-key "evil <evil@example.invalid>" ed25519 sign 0 2>/dev/null
 GNUPGHOME=/g gpg --batch --armor --export evil@example.invalid > /evil.asc
 
+echo "== (h) Debian testing/sid without VERSION_ID is refused cleanly"
+cp -L /etc/os-release /osr.bak && rm -f /etc/os-release
+printf "ID=debian\nPRETTY_NAME=\"Debian GNU/Linux forky/sid\"\n" > /etc/os-release
+rc=0; out=$(sh /src/bootstrap.sh --repo-url https://x --yes 2>&1) || rc=$?
+echo "$out" | tail -1; echo "rc=$rc"
+[ "$rc" -ne 0 ] || fail "sid without VERSION_ID was accepted"
+echo "$out" | grep -q "M1 supports Debian 13+ and Fedora; nothing was changed" || fail "no clean refusal"
+echo "$out" | grep -q "parameter not set" && fail "set -u abort"
+printf "ID=debian\nVERSION_ID=\"12\"\n" > /etc/os-release
+rc=0; sh /src/bootstrap.sh --repo-url https://x --yes >/dev/null 2>&1 || rc=$?
+[ "$rc" -ne 0 ] || fail "Debian 12 was accepted"
+cp /osr.bak /etc/os-release
+[ ! -e $KEYRING ] && [ ! -e /etc/apt/sources.list.d/emcomm.sources ] || fail "refusal wrote files"
+
 echo "== (a) two-key attack"
 cat /src/keys/emcomm-archive-keyring.asc /evil.asc > /repo/testing/emcomm-archive-keyring.asc
 rc=0; out=$(sh /src/bootstrap.sh --repo-url file:///repo --channel testing --no-provision --yes 2>&1) || rc=$?
@@ -73,5 +87,18 @@ dpkg -s bystander >/dev/null 2>&1 || fail "bystander was purged"
 dpkg -s emcomm-fake2 >/dev/null 2>&1 && fail "emcomm-fake2 still installed"
 dpkg -s dep-lib2 >/dev/null 2>&1 && fail "dep-lib2 still installed"
 dpkg -s orphan-pre >/dev/null 2>&1 || fail "pre-existing orphan was removed"
+echo "PASS"
+'
+
+echo "== (i) Ubuntu (Debian-like, but not M1) is refused before any change"
+podman run --rm -v "$ROOT:/src:ro,z" docker.io/library/ubuntu:24.04 sh -eu -c '
+fail() { echo "FAIL: $*"; exit 1; }
+before=$(ls -la /etc/apt /etc/apt/sources.list.d /usr/share/keyrings 2>&1)
+rc=0; out=$(sh /src/bootstrap.sh --repo-url https://x --yes 2>&1) || rc=$?
+echo "$out"; echo "rc=$rc"
+[ "$rc" -ne 0 ] || fail "ubuntu was accepted"
+echo "$out" | grep -q "unsupported distribution .ubuntu 24.04.; M1 supports Debian 13+ and Fedora; nothing was changed" || fail "wrong message"
+echo "$out" | grep -q "will:" && fail "consent prompt shown"
+[ "$before" = "$(ls -la /etc/apt /etc/apt/sources.list.d /usr/share/keyrings 2>&1)" ] || fail "files changed"
 echo "PASS"
 '
