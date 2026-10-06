@@ -1,0 +1,15 @@
+name: setup-build-host
+description: Install podman and nfpm on an Ubuntu runner
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        command -v podman >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq podman; }
+        NFPM_VERSION=2.41.1
+        case "$(uname -m)" in x86_64) a=x86_64 ;; aarch64) a=arm64 ;; esac
+        curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${a}.tar.gz" \
+          | sudo tar -xz -C /usr/local/bin nfpm
+        podman --version
+        nfpm --version

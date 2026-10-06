@@ -1,0 +1,102 @@
+name: packages
+on:
+  push:
+    branches: [main]
+    paths: [recipes/**, tools/**, cli/**, radios/**, ansible/**, keys/**, targets.yaml, bootstrap.sh]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild every package even if already published
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [debian-13, fedora-44, fedora-43]
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: ./.github/actions/setup-build-host
+      - name: Build ${{ matrix.target }}/${{ matrix.arch }}
+        run: >
+          uv run --directory tools emcomm-build build
+          --target ${{ matrix.target }} --arch ${{ matrix.arch }}
+          --repo-url "${{ vars.EMCOMM_REPO_URL }}"
+          --out "$GITHUB_WORKSPACE/dist/${{ matrix.target }}/${{ matrix.arch }}"
+          ${{ inputs.force && '--force' || '' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkgs-${{ matrix.target }}-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: ignore
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: publish-testing
+      cancel-in-progress: false
+    env:
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+      BUCKET: ${{ vars.R2_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: ./.github/actions/setup-build-host
+      - run: sudo apt-get install -y -qq rclone
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pkgs-*
+          path: dist
+          merge-multiple: true
+      - id: count
+        run: echo "n=$(find dist \( -name '*.deb' -o -name '*.rpm' \) 2>/dev/null | wc -l)" >> "$GITHUB_OUTPUT"
+      - name: Fetch current channel tree
+        if: steps.count.outputs.n != '0'
+        run: mkdir -p public/testing && rclone sync "r2:$BUCKET/testing" public/testing
+      - name: Write signing key
+        if: steps.count.outputs.n != '0'
+        env:
+          KEY: ${{ secrets.EMCOMM_SIGNING_KEY }}
+          PASS: ${{ secrets.EMCOMM_SIGNING_PASSPHRASE }}
+        run: |
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/signing.asc"
+          printf '%s' "$PASS" > "$RUNNER_TEMP/passphrase"
+      - name: Sign and index
+        if: steps.count.outputs.n != '0'
+        run: >
+          uv run --directory tools emcomm-build publish
+          --dist "$GITHUB_WORKSPACE/dist" --repo-dir "$GITHUB_WORKSPACE/public/testing"
+          --key-file "$RUNNER_TEMP/signing.asc" --passphrase-file "$RUNNER_TEMP/passphrase"
+      - name: Upload
+        if: steps.count.outputs.n != '0'
+        run: rclone sync public/testing "r2:$BUCKET/testing"
+      - name: Upload bootstrap.sh
+        run: rclone copyto bootstrap.sh "r2:$BUCKET/bootstrap.sh"
+      - name: Remove key material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/signing.asc" "$RUNNER_TEMP/passphrase"
+
+  verify:
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [debian-13, fedora-44, fedora-43]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build-host
+      - run: tests/integration/repo-install.sh ${{ matrix.target }} "${{ vars.EMCOMM_REPO_URL }}" testing

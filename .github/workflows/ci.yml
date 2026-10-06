@@ -1,0 +1,50 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --directory tools ruff check .
+      - run: uv run --directory tools pytest -q -m "not container and not nfpm"
+      - run: uv run --directory tools emcomm-build validate
+      - run: uv run --directory cli ruff check .
+      - run: uv run --directory cli pytest -q
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: >
+          shellcheck bootstrap.sh tools/container/*.sh recipes/*/*.sh tests/integration/*.sh
+          recipes/base/files/opt/emcomm/libexec/emcomm-run
+  packaging-integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: ./.github/actions/setup-build-host
+      - run: uv run --directory tools pytest -q -m "container or nfpm"
+  bootstrap:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build-host
+      - run: sh tests/integration/test_bootstrap_sh.sh
+  ansible:
+    runs-on: ubuntu-24.04
+    env:
+      ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/ansible
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r ansible/requirements-dev.txt && ansible-galaxy collection install containers.podman
+      - working-directory: ansible/ansible_collections/emcomm/station
+        run: ansible-lint && molecule test
