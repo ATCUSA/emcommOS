@@ -11,7 +11,51 @@
     mode: "0644"
   register: emcomm_apt_source
 
+# Two sources for the same suite with different Signed-By values break apt, so when the
+# user already has trixie-backports enabled we use theirs and only add the pin.
+- name: Look for a backports source the user configured
+  ansible.builtin.shell:
+    executable: /bin/sh
+    cmd: |
+      set --
+      for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+        [ -f "$f" ] && [ "$f" != /etc/apt/sources.list.d/emcomm-backports.sources ] && set -- "$@" "$f"
+      done
+      [ $# -gt 0 ] || exit 1
+      awk -v want="{{ emcomm_backports_suite }}" '
+        function flush() { if (deb && suite && on) found = 1; deb = 0; suite = 0; on = 1; key = "" }
+        function values(start,   i) {
+          for (i = start; i <= NF; i++) {
+            if (key == "types" && $i == "deb") deb = 1
+            if (key == "suites" && $i == want) suite = 1
+            if (key == "enabled" && (tolower($i) == "no" || tolower($i) == "false")) on = 0
+          }
+        }
+        FNR == 1 { flush() }
+        FILENAME ~ /\.sources$/ {
+          if ($0 ~ /^[ \t]*$/) { flush(); next }
+          if ($0 ~ /^#/) next
+          sub(/#.*/, "")
+          if ($0 ~ /^[ \t]/) { values(1); next }
+          key = tolower($1); sub(/:.*/, "", key)
+          if ($1 ~ /:$/) values(2); else { sub(/^[^:]*:/, ""); values(1) }
+          next
+        }
+        {
+          sub(/#.*/, "")
+          if ($1 != "deb") next
+          i = 2
+          if ($i ~ /^\[/) { while (i <= NF && $i !~ /\]$/) i++; i++ }
+          if ($(i + 1) == want) found = 1
+        }
+        END { flush(); exit found ? 0 : 1 }' "$@"
+  register: emcomm_user_backports
+  changed_when: false
+  failed_when: emcomm_user_backports.rc > 1
+  check_mode: false
+
 - name: Add Debian backports (only pinned packages are taken from it)
+  when: emcomm_user_backports.rc != 0
   ansible.builtin.copy:
     dest: /etc/apt/sources.list.d/emcomm-backports.sources
     mode: "0644"
@@ -25,6 +69,13 @@
       Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
   register: emcomm_backports_source
 
+- name: Drop our backports source in favour of the user's own
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/emcomm-backports.sources
+    state: absent
+  when: emcomm_user_backports.rc == 0
+  register: emcomm_backports_dropped
+
 - name: Pin selected packages to backports
   ansible.builtin.copy:
     dest: /etc/apt/preferences.d/emcomm-backports.pref
@@ -37,4 +88,6 @@
 - name: Refresh apt metadata
   ansible.builtin.apt:
     update_cache: true
-  when: (emcomm_apt_source.changed or emcomm_backports_source.changed) and emcomm_repo_refresh
+  when: >-
+    (emcomm_apt_source.changed or emcomm_backports_source.changed
+     or emcomm_backports_dropped.changed) and emcomm_repo_refresh

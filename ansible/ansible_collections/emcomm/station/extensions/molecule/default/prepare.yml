@@ -4,3 +4,19 @@
     - name: Create an operator account
       ansible.builtin.user:
         name: operator
+
+    # The user already runs backports in one-line format, and an older emcomm run left our
+    # own source behind: the role must use theirs, drop ours, and still write the pin.
+    - name: Add a user-managed backports source
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/user-backports.list
+        content: "deb http://deb.debian.org/debian trixie-backports main\n"
+        mode: "0644"
+      when: ansible_os_family == "Debian"
+
+    - name: Leave a stale emcomm backports source behind
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/emcomm-backports.sources
+        content: "Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie-backports\nComponents: main\n"
+        mode: "0644"
+      when: ansible_os_family == "Debian"

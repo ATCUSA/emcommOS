@@ -16,18 +16,22 @@
           - "'Signed-By: /usr/share/keyrings/emcomm-archive-keyring.asc' in (emcomm_sources.content | b64decode)"
       when: ansible_os_family == "Debian"
 
-    - name: Stat the Debian key and backports source
+    - name: Stat the Debian key and backports sources
       ansible.builtin.stat:
         path: "{{ item }}"
       loop:
         - /usr/share/keyrings/emcomm-archive-keyring.asc
         - /etc/apt/sources.list.d/emcomm-backports.sources
+        - /etc/apt/sources.list.d/user-backports.list
       register: emcomm_deb_files
       when: ansible_os_family == "Debian"
 
-    - name: Check the Debian key and backports source exist
+    - name: Key present; the user's backports source is used instead of ours
       ansible.builtin.assert:
-        that: emcomm_deb_files.results | map(attribute='stat.exists') | list is all
+        that:
+          - emcomm_deb_files.results[0].stat.exists
+          - not emcomm_deb_files.results[1].stat.exists
+          - emcomm_deb_files.results[2].stat.exists
       when: ansible_os_family == "Debian"
 
     - name: Read the backports pin
