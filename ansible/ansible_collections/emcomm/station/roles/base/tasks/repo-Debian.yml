@@ -1,0 +1,40 @@
+- name: Install the emcommOS signing key
+  ansible.builtin.copy:
+    src: emcomm-archive-keyring.asc
+    dest: /usr/share/keyrings/emcomm-archive-keyring.asc
+    mode: "0644"
+
+- name: Add the emcommOS apt source
+  ansible.builtin.template:
+    src: emcomm.sources.j2
+    dest: /etc/apt/sources.list.d/emcomm.sources
+    mode: "0644"
+  register: emcomm_apt_source
+
+- name: Add Debian backports (only pinned packages are taken from it)
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/emcomm-backports.sources
+    mode: "0644"
+    content: |
+      # Managed by emcommOS. Only packages listed in preferences.d/emcomm-backports.pref
+      # are installed from backports.
+      Types: deb
+      URIs: http://deb.debian.org/debian
+      Suites: {{ emcomm_backports_suite }}
+      Components: main
+      Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+  register: emcomm_backports_source
+
+- name: Pin selected packages to backports
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/emcomm-backports.pref
+    mode: "0644"
+    content: |
+      Package: {{ emcomm_backports_packages | join(' ') }}
+      Pin: release n={{ emcomm_backports_suite }}
+      Pin-Priority: {{ emcomm_backports_priority }}
+
+- name: Refresh apt metadata
+  ansible.builtin.apt:
+    update_cache: true
+  when: (emcomm_apt_source.changed or emcomm_backports_source.changed) and emcomm_repo_refresh

@@ -1,0 +1,53 @@
+- name: Verify
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Read the Debian apt source
+      ansible.builtin.slurp:
+        src: /etc/apt/sources.list.d/emcomm.sources
+      register: emcomm_sources
+      when: ansible_os_family == "Debian"
+
+    - name: Check the apt source
+      ansible.builtin.assert:
+        that:
+          - "'URIs: https://repo.invalid/testing/deb' in (emcomm_sources.content | b64decode)"
+          - "'Suites: debian-13' in (emcomm_sources.content | b64decode)"
+      when: ansible_os_family == "Debian"
+
+    - name: Read the backports pin
+      ansible.builtin.slurp:
+        src: /etc/apt/preferences.d/emcomm-backports.pref
+      register: emcomm_pin
+      when: ansible_os_family == "Debian"
+
+    - name: Check the backports pin
+      ansible.builtin.assert:
+        that:
+          - "'Pin: release n=trixie-backports' in (emcomm_pin.content | b64decode)"
+          - "'libhamlib*' in (emcomm_pin.content | b64decode)"
+      when: ansible_os_family == "Debian"
+
+    - name: Read the dnf repo
+      ansible.builtin.slurp:
+        src: /etc/yum.repos.d/emcomm-testing.repo
+      register: emcomm_repo
+      when: ansible_os_family == "RedHat"
+
+    - name: Check the dnf repo
+      ansible.builtin.assert:
+        that:
+          - "'rpm/fedora-$releasever/$basearch' in (emcomm_repo.content | b64decode)"
+          - "'repo_gpgcheck = 1' in (emcomm_repo.content | b64decode)"
+      when: ansible_os_family == "RedHat"
+
+    - name: Read operator groups
+      ansible.builtin.command: id -nG operator
+      register: emcomm_groups
+      changed_when: false
+
+    - name: Operator is in dialout and audio
+      ansible.builtin.assert:
+        that:
+          - "'dialout' in emcomm_groups.stdout.split()"
+          - "'audio' in emcomm_groups.stdout.split()"

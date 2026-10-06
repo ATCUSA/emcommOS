@@ -1,0 +1,6 @@
+skip_list:
+  # Variables use the collection-wide emcomm_ prefix (public interface shared by all roles and the CLI).
+  - var-naming[no-role-prefix]
+  # Not published to Galaxy yet.
+  - galaxy[no-changelog]
+  - galaxy[no-repository]

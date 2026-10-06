@@ -1,0 +1,9 @@
+# Base URL of the emcommOS package repository, without trailing slash.
+emcomm_repo_url: ""
+emcomm_channel: testing
+# Users who operate radios; added to the serial/audio groups.
+emcomm_users: []
+# Refresh package metadata after changing the repository definition.
+emcomm_repo_refresh: true
+# Install and enable chrony (disable in containers without systemd).
+emcomm_chrony_enable: true

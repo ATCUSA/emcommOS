@@ -1,0 +1,6 @@
+emcomm_radio_groups: [dialout, audio, plugdev]
+emcomm_chrony_service: chrony
+# Must match the debian-13 extra_repos entry in targets.yaml (tools/tests/test_ansible_sync.py).
+emcomm_backports_suite: trixie-backports
+emcomm_backports_packages: ["libhamlib*", "wsjtx*", "direwolf"]
+emcomm_backports_priority: 500

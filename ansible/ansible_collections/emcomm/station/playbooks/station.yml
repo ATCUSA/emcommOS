@@ -1,0 +1,8 @@
+- name: Provision an emcommOS station
+  hosts: all
+  become: true
+  roles:
+    - emcomm.station.base
+    - emcomm.station.toolsets
+    - emcomm.station.radio_hw
+    - emcomm.station.services

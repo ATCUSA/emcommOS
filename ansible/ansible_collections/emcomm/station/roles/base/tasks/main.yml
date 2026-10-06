@@ -1,0 +1,40 @@
+- name: Check prerequisites
+  ansible.builtin.assert:
+    that:
+      - emcomm_repo_url | length > 0
+      - ansible_os_family in ["Debian", "RedHat"]
+    fail_msg: >-
+      Set emcomm_repo_url and run on a Debian- or Fedora-family system
+      (other distributions arrive in later milestones).
+
+- name: Load OS family variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+
+- name: Configure the emcommOS repository
+  ansible.builtin.include_tasks: "repo-{{ ansible_os_family }}.yml"
+
+- name: Install chrony
+  ansible.builtin.package:
+    name: chrony
+    state: present
+  when: emcomm_chrony_enable
+
+- name: Enable chrony
+  ansible.builtin.service:
+    name: "{{ emcomm_chrony_service }}"
+    enabled: true
+    state: started
+  when: emcomm_chrony_enable
+
+- name: Ensure radio groups exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+    system: true
+  loop: "{{ emcomm_radio_groups }}"
+
+- name: Add operators to radio groups
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: "{{ emcomm_radio_groups }}"
+    append: true
+  loop: "{{ emcomm_users }}"

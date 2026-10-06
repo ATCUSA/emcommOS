@@ -1,0 +1,13 @@
+namespace: emcomm
+name: station
+version: 0.1.0
+readme: README.md
+authors:
+  - emcommOS contributors
+license:
+  - Apache-2.0
+description: Provision emcommOS ham radio / emcomm stations
+dependencies: {}
+tags:
+  - linux
+  - tools

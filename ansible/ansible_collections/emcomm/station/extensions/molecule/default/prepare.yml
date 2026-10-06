@@ -1,0 +1,6 @@
+- name: Prepare
+  hosts: all
+  tasks:
+    - name: Create an operator account
+      ansible.builtin.user:
+        name: operator

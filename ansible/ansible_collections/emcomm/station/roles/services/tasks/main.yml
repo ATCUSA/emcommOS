@@ -1,0 +1,2 @@
+- name: Placeholder until this role is implemented
+  ansible.builtin.meta: noop

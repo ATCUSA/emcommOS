@@ -1,0 +1,30 @@
+driver:
+  name: podman
+platforms:
+  - name: emcomm-debian-13
+    image: docker.io/library/debian:13
+    dockerfile: Containerfile.j2
+    pre_build_image: false
+    command: /sbin/init
+    systemd: always
+  - name: emcomm-fedora-44
+    image: registry.fedoraproject.org/fedora:44
+    dockerfile: Containerfile.j2
+    pre_build_image: false
+    command: /sbin/init
+    systemd: always
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        emcomm_repo_url: https://repo.invalid
+        emcomm_repo_refresh: false
+        # Rootless containers cannot adjust the clock (chrony needs CAP_SYS_TIME), so the
+        # unit never stays started and idempotence fails. Skip chrony here.
+        emcomm_chrony_enable: false
+        emcomm_toolsets: []
+        emcomm_stations: []
+        emcomm_users: [operator]
+verifier:
+  name: ansible

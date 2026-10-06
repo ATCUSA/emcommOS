@@ -1,0 +1,15 @@
+- name: Install the emcommOS signing key
+  ansible.builtin.copy:
+    src: emcomm-archive-keyring.asc
+    dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
+    mode: "0644"
+
+- name: Add the emcommOS dnf repository
+  ansible.builtin.yum_repository:
+    name: "emcomm-{{ emcomm_channel }}"
+    description: "emcommOS {{ emcomm_channel }}"
+    baseurl: "{{ emcomm_repo_url }}/{{ emcomm_channel }}/rpm/{{ ansible_distribution | lower }}-$releasever/$basearch"
+    gpgcheck: true
+    repo_gpgcheck: true
+    gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
+    enabled: true

@@ -12,3 +12,5 @@ build/
 public/
 .env
 .env.*
+ansible/ansible_collections/containers/
+ansible/ansible_collections/containers.podman-*.info/
