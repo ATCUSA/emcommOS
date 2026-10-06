@@ -85,6 +85,8 @@ backports source and pin, emcomm user units and udev rules, and `/etc/emcomm`. Y
 
 ## Develop
 
+- Tooling: `nix develop` gives pinned uv/python/nfpm/shellcheck/actionlint/gnupg/rclone
+  (optional; otherwise install them yourself). Podman comes from your distro.
 - Build tooling (Python, uv): `uv run --directory tools pytest -q`; build packages with
   `uv run --directory tools emcomm-build build --target debian-13` (needs podman and nfpm;
   CI gets both from the `.github/actions/setup-build-host` composite action, a Nix dev shell
