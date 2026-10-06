@@ -7,3 +7,10 @@ test -f /opt/emcomm/share/emcomm/ansible/ansible_collections/emcomm/station/play
 test -s /opt/emcomm/share/emcomm/ansible/ansible_collections/emcomm/station/roles/base/files/emcomm-archive-keyring.asc
 grep -q '^EMCOMM_KEY_FINGERPRINT="[0-9A-F]\{40\}"$' /opt/emcomm/share/emcomm/bootstrap.sh
 ansible-playbook --version >/dev/null
+# Python libraries come from distro packages, not copies bundled in the venv.
+grep -qx 'include-system-site-packages = true' /opt/emcomm/lib/emcomm-cli/pyvenv.cfg
+for sp in /opt/emcomm/lib/emcomm-cli/lib/python3*/site-packages; do
+  for m in yaml _yaml jsonschema tomli_w; do
+    if [ -e "$sp/$m" ]; then echo "bundled copy of $m in $sp" >&2; exit 1; fi
+  done
+done

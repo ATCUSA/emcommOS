@@ -2,8 +2,10 @@
 set -euo pipefail
 venv=$PREFIX/lib/emcomm-cli
 rm -rf "$venv"
-python3 -m venv "$venv"
-"$venv/bin/pip" install --quiet --no-cache-dir "$SRC/cli"
+# pyyaml, jsonschema and tomli-w come from distro packages (see recipe.yaml run deps); the
+# venv only holds emcomm itself, built offline with the distro's hatchling.
+python3 -m venv --system-site-packages "$venv"
+"$venv/bin/pip" install --quiet --no-cache-dir --no-deps --no-build-isolation --no-index "$SRC/cli"
 share=$DESTDIR$PREFIX/share/emcomm
 mkdir -p "$DESTDIR$PREFIX/lib" "$DESTDIR$PREFIX/bin" "$share"
 cp -a "$venv" "$DESTDIR$PREFIX/lib/"

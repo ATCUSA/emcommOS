@@ -3,14 +3,18 @@ kind: app
 summary: emcommOS operator CLI, radio definitions, Ansible collection and bootstrap script
 license: Apache-2.0
 version: "0.1.0"
-release: 2
+release: 3
 source:
   type: local
   paths: [cli, radios, ansible, bootstrap.sh]
+# Python libraries come from the distro (security updates via the OS), never from PyPI:
+# the venv uses --system-site-packages and pip installs only our own code, offline.
 deps:
   debian:
-    build: [python3, python3-venv]
-    run: [python3, ansible-core, python3-apt]        # apt module needs python3-apt
+    build: [python3, python3-venv, python3-pip, python3-hatchling]
+    run: [python3, ansible-core, python3-apt,        # apt module needs python3-apt
+          python3-yaml, python3-jsonschema, python3-tomli-w]
   fedora:
-    build: [python3]
-    run: [python3, ansible-core, python3-libdnf5]    # dnf5 module needs libdnf5 bindings
+    build: [python3, python3-pip, python3-hatchling]
+    run: [python3, ansible-core, python3-libdnf5,    # dnf5 module needs libdnf5 bindings
+          python3-pyyaml, python3-jsonschema, python3-tomli-w]
