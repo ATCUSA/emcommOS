@@ -10,6 +10,7 @@ CALLSIGN_RE = re.compile(
 )
 GRID_RE = re.compile(r"^[A-R]{2}\d{2}(?:[A-X]{2})?$", re.IGNORECASE)
 PTT_METHODS = ("cat", "rts", "dtr", "vox")
+CONTROL_MODES = ("direct", "wfview")
 
 
 def normalize_callsign(raw: str) -> str:
@@ -95,6 +96,16 @@ class Station:
     cat: UsbMatch | None = None
     audio: UsbMatch | None = None
     ptt: str | None = None
+    control: str = "direct"
+    virtual_audio: bool = False
+
+    @property
+    def rx_sink(self) -> str:
+        return f"emcomm-{self.name}-rx"
+
+    @property
+    def tx_sink(self) -> str:
+        return f"emcomm-{self.name}-tx"
 
     @property
     def cat_link(self) -> str:

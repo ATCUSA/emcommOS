@@ -26,3 +26,9 @@ def test_template_round_trips():
 def test_template_minimal():
     st = station_from_dict(tomllib.loads(render({"name": "b", "radio": "generic-vox"})), "t")
     assert st.cat is None and st.ptt is None
+
+
+def test_template_control():
+    st = station_from_dict(tomllib.loads(render(
+        {"name": "mk2", "radio": "icom-ic7300mk2", "control": "wfview"})), "t")
+    assert st.control == "wfview"

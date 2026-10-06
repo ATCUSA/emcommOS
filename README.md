@@ -47,6 +47,23 @@ systemctl --user enable --now emcomm-rigctld          # CAT/PTT hub on 127.0.0.1
 `emcomm radios` lists supported radios. Every app talks to the radio through rigctld on
 127.0.0.1:4532, so switching radios or operators is one command.
 
+### IC-7300MK2 over LAN with wfview
+
+wfview (installed with `emcomm-core`) can own an Icom radio reached over Ethernet; emcomm then
+proxies its rigctld-compatible server so WSJT-X, JS8Call, fldigi, Direwolf and Pat keep using
+127.0.0.1:4532.
+
+```bash
+sudo emcomm station add mk2 --radio icom-ic7300mk2 --control wfview --virtual-audio
+emcomm use K7ABC --station mk2
+systemctl --user restart pipewire pipewire-pulse wireplumber   # creates emcomm-mk2-rx / -tx
+/opt/emcomm/bin/wfview     # connect to the radio's IP; audio out emcomm-mk2-rx, in Monitor of emcomm-mk2-tx
+systemctl --user restart emcomm-rigctld                        # start wfview first
+```
+
+wfview's rigctld server listens on all interfaces without a password: block TCP 4533 in your
+firewall on untrusted networks.
+
 ### Your own machine (BYOD)
 
 emcommOS never changes a machine without showing what it will do and asking first

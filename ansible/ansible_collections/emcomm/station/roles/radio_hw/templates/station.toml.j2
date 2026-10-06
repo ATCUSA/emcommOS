@@ -4,6 +4,12 @@ radio = "{{ item.radio }}"
 {% if item.ptt is defined %}
 ptt = "{{ item.ptt }}"
 {% endif %}
+{% if item.control is defined %}
+control = "{{ item.control }}"
+{% endif %}
+{% if item.virtual_audio | default(false) %}
+virtual_audio = true
+{% endif %}
 {% for section in ['cat', 'audio'] %}
 {% if item[section] is defined %}
 

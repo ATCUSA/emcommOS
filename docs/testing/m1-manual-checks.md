@@ -27,3 +27,19 @@ checks (2–3, 11) when you have physical access to a radio; the LAN checks (12�
 10. **Operator switch**: `emcomm operator add <CALL2> --grid <GRID2>`; `emcomm use <CALL2> --station kita`
     shows a diff of only call/grid lines; apply and confirm apps show the new call;
     previous files are in `~/.local/state/emcomm/backups/`.
+11. **IC-7300MK2 (direct)**: `emcomm station detect` with the radio on USB-C. **Record the
+    VID:PID, product string and interface numbers** of both ttyACM ports and the sound card
+    in the PR so `radios/icom-ic7300mk2.yaml` can gain `usb_hints`.
+    `sudo emcomm station add mk2 --radio icom-ic7300mk2 --cat ttyACM0 --audio cardN`;
+    repeat checks 3–5 (rigctld uses hamlib model 3094).
+12. **IC-7300MK2 over LAN via wfview (primary setup today)**: `sudo emcomm station add mk2
+    --radio icom-ic7300mk2 --control wfview --virtual-audio`; `emcomm use <CALL> --station mk2`;
+    restart PipeWire; in wfview connect to the radio's IP and set audio out/in to the
+    emcomm virtual devices; record the exact device names WSJT-X and JS8Call list.
+    For a USB-attached MK2 instead: `--cat ttyACM0 --audio cardN --control wfview`;
+    start wfview, pick the radio's port, confirm waterfall; then
+    `systemctl --user restart emcomm-rigctld` and repeat check 4 (frequency/PTT through
+    127.0.0.1:4532 → wfview 4533) and check 5 (WSJT-X CAT/PTT while wfview shows the TX).
+    Confirm `ss -ltn | grep 4533` and note that it listens on 0.0.0.0.
+13. **IC-7300MK2 LAN (optional)**: connect wfview to the radio's Ethernet port (Network
+    settings in wfview); record whether LAN control and audio work.

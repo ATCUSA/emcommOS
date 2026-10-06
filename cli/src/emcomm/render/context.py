@@ -22,3 +22,15 @@ class RenderContext:
     @property
     def alsa_device(self) -> str | None:
         return f"sysdefault:CARD={self.station.alsa_id}" if self.station.audio else None
+
+    @property
+    def sound_in(self) -> str | None:
+        if self.station.virtual_audio:
+            return f"{self.station.rx_sink}.monitor"
+        return self.alsa_device
+
+    @property
+    def sound_out(self) -> str | None:
+        if self.station.virtual_audio:
+            return self.station.tx_sink
+        return self.alsa_device

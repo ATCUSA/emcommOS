@@ -1,0 +1,24 @@
+name: wfview
+kind: app
+summary: wfview open-source Icom/Kenwood/Yaesu rig control with waterfall and LAN remote
+license: GPL-3.0-or-later
+homepage: https://wfview.org/
+version: "2.23"
+release: 1
+source:
+  type: git
+  url: https://gitlab.com/eliggett/wfview.git
+  ref: "v{version}"
+upstream:
+  type: git-tags
+  url: https://gitlab.com/eliggett/wfview.git
+  tag_pattern: 'v(\d+\.\d+)'
+deps:
+  debian:
+    build: [qmake6, qt6-base-dev, qt6-serialport-dev, qt6-multimedia-dev, qt6-websockets-dev,
+            libqcustomplot-dev, libopus-dev, libeigen3-dev, portaudio19-dev, librtaudio-dev,
+            libhidapi-dev, libudev-dev, libpulse-dev]
+  fedora:
+    build: [qt6-qtbase-devel, qt6-qtserialport-devel, qt6-qtmultimedia-devel,
+            qt6-qtwebsockets-devel, qcustomplot-qt6-devel, opus-devel, eigen3-devel,
+            portaudio-devel, rtaudio-devel, hidapi-devel, systemd-devel, pulseaudio-libs-devel]

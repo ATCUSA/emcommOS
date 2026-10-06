@@ -1,0 +1,14 @@
+id: icom-ic7300mk2
+vendor: Icom
+model: IC-7300MK2
+hamlib_model: 3094
+baud: 115200
+ptt: cat
+notes:
+  - "CI-V Address: B6h (default). CI-V USB Baud Rate: 115200 (or Auto)"
+  - "CI-V USB Echo Back: OFF"
+  - "USB AF/IF Output: AF; DATA OFF MOD and DATA MOD: USB; start USB MOD Level near 50%"
+  - "USB SEND / USB Keying: OFF (PTT is by CAT)"
+  - "USB-C shows two serial ports: ttyACM0 (CI-V) and ttyACM1 (USB2 Function). Use --cat ttyACM0"
+  - "wfview control: add the kit with --control wfview, start wfview, select the radio's USB port in wfview"
+  - "LAN (no USB): sudo emcomm station add mk2 --radio icom-ic7300mk2 --control wfview --virtual-audio; connect wfview to the radio's IP"

@@ -20,8 +20,10 @@ def wsjtx_values(ctx: RenderContext) -> dict[str, str]:
     }
     if ctx.operator.grid:
         values["MyGrid"] = ctx.operator.grid
-    if ctx.alsa_device:
-        values["SoundInName"] = values["SoundOutName"] = f'"{ctx.alsa_device}"'
+    if ctx.sound_in:
+        values["SoundInName"] = f'"{ctx.sound_in}"'
+    if ctx.sound_out:
+        values["SoundOutName"] = f'"{ctx.sound_out}"'
     return values
 
 

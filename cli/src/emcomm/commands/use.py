@@ -57,4 +57,13 @@ def cmd_use(args: argparse.Namespace, paths: Paths) -> int:
     if not restart_services():
         print("note: could not restart emcomm user services; restart them yourself if running",
               file=sys.stderr)
+    if station.control == "wfview":
+        print("warning: wfview's rigctld server listens on all interfaces without a password; "
+              "block TCP 4533 in the firewall on untrusted networks. Start wfview before "
+              "emcomm-rigctld.", file=sys.stderr)
+    if station.virtual_audio:
+        print("note: restart PipeWire to create the virtual devices "
+              "(systemctl --user restart pipewire pipewire-pulse wireplumber). In wfview, set "
+              f"audio output to '{station.rx_sink}' and input to 'Monitor of {station.tx_sink}'.",
+              file=sys.stderr)
     return 0

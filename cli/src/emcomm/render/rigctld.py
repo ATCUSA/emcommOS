@@ -5,6 +5,9 @@ from __future__ import annotations
 from .context import RIGCTLD_ADDR, RenderContext
 
 DUMMY_MODEL = 1
+NET_RIGCTL_MODEL = 2
+# wfview's rigctld-compatible server (GUI app only; binds all interfaces, no auth).
+WFVIEW_RIGCTL_ADDR = "127.0.0.1:4533"
 
 
 def _validate_arg(arg: str) -> None:
@@ -17,7 +20,16 @@ def rigctld_args(ctx: RenderContext) -> list[str]:
     # Parse RIGCTLD_ADDR to extract host and port
     host, port = RIGCTLD_ADDR.split(":")
 
-    args = ["-m", str(ctx.radio.hamlib_model), "-T", host, "-t", port]
+    hub = ["-T", host, "-t", port]
+
+    if ctx.station.control == "wfview":
+        # wfview owns the radio; the hub proxies its server so apps still use RIGCTLD_ADDR.
+        args = ["-m", str(NET_RIGCTL_MODEL), "-r", WFVIEW_RIGCTL_ADDR, *hub]
+        for arg in args:
+            _validate_arg(arg)
+        return args
+
+    args = ["-m", str(ctx.radio.hamlib_model), *hub]
     has_cat = ctx.station.cat is not None
     if ctx.radio.hamlib_model != DUMMY_MODEL and has_cat:
         args += ["-r", ctx.station.cat_link, "-s", str(ctx.radio.baud)]

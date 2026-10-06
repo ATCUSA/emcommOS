@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from ..detect import candidates, find_node, scan, to_match
-from ..models import PTT_METHODS, RadioDef, Station, UsbHint
+from ..models import CONTROL_MODES, PTT_METHODS, RadioDef, Station, UsbHint
 from ..paths import Paths
 from ..profiles import list_stations, save_station
 from ..radios import load_radios
@@ -24,6 +24,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     add.add_argument("--cat", help="serial node for CAT/PTT, e.g. ttyUSB0 (default: auto)")
     add.add_argument("--audio", help="sound card node, e.g. card1 (default: auto)")
     add.add_argument("--ptt", choices=PTT_METHODS, help="override the radio's PTT method")
+    add.add_argument("--control", choices=CONTROL_MODES, default="direct",
+                     help="direct: rigctld drives the radio; wfview: wfview owns it")
+    add.add_argument("--virtual-audio", action="store_true",
+                     help="LAN kit: create PipeWire virtual RX/TX devices")
     add.add_argument("--no-udev", action="store_true", help="do not write udev rules")
     add.set_defaults(func=cmd_add)
     actions.add_parser("list", help="list station kits").set_defaults(func=cmd_list)
@@ -66,12 +70,16 @@ def cmd_add(args: argparse.Namespace, paths: Paths) -> int:
         cat=_pick("tty", args.cat, radio.cat_hints, devices, "--cat"),
         audio=_pick("sound", args.audio, radio.audio_hints, devices, "--audio"),
         ptt=args.ptt,
+        control=args.control,
+        virtual_audio=args.virtual_audio,
     )
     path = save_station(paths, station)
     print(f"saved station {station.name} ({radio.label}) -> {path}")
     if station.cat:
         print(f"  CAT/PTT port: {station.cat_link}")
-    elif station.ptt_method(radio) in ("rts", "dtr") or radio.hamlib_model != 1:
+    elif args.control != "wfview" and (
+            station.ptt_method(radio) in ("rts", "dtr") or radio.hamlib_model != 1):
+        # (wfview owns the CAT port, or reaches the radio over LAN: nothing to warn about)
         print("  warning: no CAT serial port found; plug in the radio or pass --cat")
     if station.audio:
         print(f"  sound card:   {station.alsa_id} (replug the radio after udev rules change)")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import fnmatch
 import os
 import shutil
 import subprocess
@@ -19,8 +20,10 @@ from .render.context import RenderContext
 from .render.direwolf import render_direwolf
 from .render.fldigi import render_fldigi
 from .render.pat import render_pat
+from .render.pipewire import render_pipewire
 from .render.qtini import render_wsjtx
 from .render.rigctld import render_rigctld
+from .render.wfview import render_wfview
 from .validation import ProfileError
 
 Renderer = Callable[[str | None, RenderContext], str | None]
@@ -35,6 +38,9 @@ class AppConfig:
 
 APP_CONFIGS = (
     AppConfig("rigctld", ".config/emcomm/rigctld.env", render_rigctld),
+    AppConfig("wfview", ".config/wfview/wfview.conf", render_wfview),
+    AppConfig("pipewire", ".config/pipewire/pipewire.conf.d/60-emcomm-{station}.conf",
+              render_pipewire),
     AppConfig("wsjtx", ".config/WSJT-X.ini", render_wsjtx),
     AppConfig("js8call", ".config/JS8Call.ini", render_wsjtx),
     AppConfig("fldigi", ".fldigi/fldigi_def.xml", render_fldigi),
@@ -45,6 +51,11 @@ SERVICES = ("emcomm-rigctld.service", "emcomm-direwolf.service", "emcomm-pat.ser
 
 # Files fully owned by emcomm are created private; app configs use the default umask.
 _PRIVATE_NEW = frozenset({".config/emcomm/rigctld.env", ".config/emcomm/direwolf.conf"})
+_PRIVATE_NEW_PATTERNS = (".config/pipewire/pipewire.conf.d/60-emcomm-*.conf",)
+
+
+def _is_private_new(rel: str) -> bool:
+    return rel in _PRIVATE_NEW or any(fnmatch.fnmatchcase(rel, p) for p in _PRIVATE_NEW_PATTERNS)
 
 
 @dataclass(frozen=True)
@@ -64,7 +75,7 @@ def _read(path: Path) -> str:
 def plan_changes(paths: Paths, ctx: RenderContext) -> list[FileChange]:
     changes = []
     for cfg in APP_CONFIGS:
-        path = paths.home / cfg.relpath
+        path = paths.home / cfg.relpath.format(station=ctx.station.name)
         real = _real(path)
         old = _read(real) if real.exists() else None
         new = cfg.render(old, ctx)
@@ -142,7 +153,7 @@ def apply_changes(paths: Paths, changes: list[FileChange], now: datetime) -> Pat
         if c.old is not None:
             mode = real.stat().st_mode & 0o7777
         else:
-            mode = 0o600 if rel.as_posix() in _PRIVATE_NEW else None
+            mode = 0o600 if _is_private_new(rel.as_posix()) else None
         try:
             _write(real, c.new, mode)
         except OSError as exc:

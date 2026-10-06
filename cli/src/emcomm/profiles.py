@@ -88,6 +88,10 @@ def station_to_dict(st: Station) -> dict:
     data: dict = {"name": st.name, "radio": st.radio}
     if st.ptt:
         data["ptt"] = st.ptt
+    if st.control != "direct":
+        data["control"] = st.control
+    if st.virtual_audio:
+        data["virtual_audio"] = True
     for key, match in (("cat", st.cat), ("audio", st.audio)):
         if match:
             m = {"vendor_id": match.vendor_id, "product_id": match.product_id}
@@ -107,7 +111,9 @@ def station_from_dict(data: dict, where: Path | str) -> Station:
         return UsbMatch(**m) if m else None
 
     return Station(name=data["name"], radio=data["radio"], cat=match("cat"),
-                   audio=match("audio"), ptt=data.get("ptt"))
+                   audio=match("audio"), ptt=data.get("ptt"),
+                   control=data.get("control", "direct"),
+                   virtual_audio=data.get("virtual_audio", False))
 
 
 def save_station(paths: Paths, st: Station) -> Path:

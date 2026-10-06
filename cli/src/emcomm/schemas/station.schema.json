@@ -7,6 +7,8 @@
     "name": {"type": "string", "pattern": "\\A[a-z0-9][a-z0-9-]{0,7}\\Z"},
     "radio": {"type": "string"},
     "ptt": {"enum": ["cat", "rts", "dtr", "vox"]},
+    "control": {"enum": ["direct", "wfview"]},
+    "virtual_audio": {"type": "boolean"},
     "cat": {"$ref": "#/$defs/match"},
     "audio": {"$ref": "#/$defs/match"}
   },
