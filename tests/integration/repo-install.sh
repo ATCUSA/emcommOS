@@ -3,7 +3,8 @@
 #   1. bootstrap.sh installs the CLI (pinned key), and emcomm bootstrap applies the playbook;
 #   2. the rigctld hub answers through emcomm-run (distro or emcomm-built rigctld);
 #   3. emcomm use renders WSJT-X.ini managed keys and keeps the user's own;
-#   4. uninstall removes every emcomm package, repo file, pin, unit and /etc/emcomm.
+#   4. uninstall removes every emcomm package, repo file, pin, unit, /etc/emcomm and (Fedora)
+#      the rpm-imported signing key.
 # Usage: repo-install.sh <target> <repo-url> [channel]
 #   target: debian-13 | fedora-44 | fedora-43;  repo-url: https://
 set -euo pipefail
@@ -65,9 +66,19 @@ podman run --rm -v "$root:/emcomm:ro,z" -e URL="$url" -e CHANNEL="$channel" "$im
   absent "/etc/apt/sources.list.d/emcomm*" "/etc/apt/preferences.d/emcomm*" "/etc/yum.repos.d/emcomm*"
   test ! -e /etc/emcomm
   absent "/usr/share/keyrings/emcomm-archive-keyring.asc" "/etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm"
-  test ! -e /usr/bin/emcomm && test ! -L /usr/bin/emcomm
+  absent /usr/bin/emcomm
+  [ ! -L /usr/bin/emcomm ] || exit 1   # a dangling symlink too
   test ! -e /opt/emcomm
   absent "/etc/systemd/user/emcomm-*"
+  if command -v rpm >/dev/null && ! command -v apt-get >/dev/null; then
+    fpr=$(sed -n "s/^EMCOMM_KEY_FINGERPRINT=\"\([0-9A-F]*\)\"$/\1/p" /emcomm/bootstrap.sh)
+    fpr=$(printf "%s" "$fpr" | tr A-F a-f)
+    [ ${#fpr} -eq 40 ] || { echo "FAIL: could not derive the rpm key id" >&2; exit 1; }
+    # rpm 4 names the key by its last 8 hex digits, rpm 6 by the whole fingerprint.
+    for k in "gpg-pubkey-$(printf "%s" "$fpr" | tail -c 8)" "gpg-pubkey-$fpr"; do
+      if rpm -q "$k" >/dev/null 2>&1; then echo "FAIL: $k still in the rpm database" >&2; exit 1; fi
+    done
+  fi
   grep -qx "Font=Keep Me" ~/.config/WSJT-X.ini   # user files untouched by uninstall
   echo "M1 acceptance OK"
 '

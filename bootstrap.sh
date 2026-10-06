@@ -9,6 +9,10 @@
 set -eu
 
 EMCOMM_KEY_FINGERPRINT="7F78527F54EA22280FD664748AA729513E77A41A"
+# rpm names imported keys gpg-pubkey-<id>: the last 8 hex of the fingerprint (rpm 4) or the
+# whole fingerprint (rpm 6, Fedora 44+), lowercase.
+RPM_KEY_FPR=$(printf '%s' "$EMCOMM_KEY_FINGERPRINT" | tr 'A-F' 'a-f')
+RPM_KEY_ID=$(printf '%s' "$RPM_KEY_FPR" | tail -c 8)
 REPO_URL=${EMCOMM_REPO_URL:-}
 CHANNEL=${EMCOMM_CHANNEL:-testing}
 TOOLSETS=${EMCOMM_TOOLSETS:-standard}
@@ -40,6 +44,10 @@ done
 REPO_URL=${REPO_URL%/}
 case $CHANNEL in ''|.|..|*[!a-z0-9._-]*) die "invalid channel '$CHANNEL' (allowed: a-z 0-9 . _ -)" ;; esac
 case $REPO_URL in *[!A-Za-z0-9._~:/%@+-]*) die "repository URL contains unsupported characters" ;; esac
+case $TOOLSETS in
+  ''|,*|*,|*,,*|*[!a-z0-9,-]*)
+    die "invalid toolsets '$TOOLSETS' (comma-separated names of a-z 0-9 -)" ;;
+esac
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
 [ -r /etc/os-release ] || die "cannot read /etc/os-release; nothing was changed"
@@ -109,7 +117,15 @@ uninstall() {
   echo "  - the emcomm-* packages and any dependencies that only they needed (listed below)"
   echo "  - the emcommOS repository and signing key, and the Debian backports source and pin"
   echo "  - emcomm user units and udev rules, /opt/emcomm, and /etc/emcomm (including your station kits)"
-  echo "Your files in ~/.config and app settings are kept; group memberships and chrony stay."
+  if [ "$FAMILY" = fedora ]; then echo "  - the emcommOS key from the RPM database (gpg-pubkey-$RPM_KEY_ID / $RPM_KEY_FPR)"; fi
+  echo "Kept (per user; delete by hand if you want them gone):"
+  echo "  - ~/.config/emcomm (station, operator, direwolf.conf, rigctld.env)"
+  echo "  - app settings emcomm managed keys in (WSJT-X, JS8Call, fldigi, flrig, Pat, wfview)"
+  echo "  - ~/.config/pipewire/pipewire.conf.d/60-emcomm-*.conf"
+  echo "  - enabled user-unit symlinks under ~/.config/systemd/user/*.wants/emcomm-*.service"
+  echo "  Group memberships (dialout, audio) and chrony also stay."
+  echo "Stop running emcomm services first, as each user:"
+  echo "  systemctl --user disable --now emcomm-rigctld emcomm-direwolf emcomm-pat"
   pkgs=""; MODE="none"
   if [ "$FAMILY" = debian ]; then
     command -v dpkg-query >/dev/null 2>&1 || preview_fail "dpkg-query not found"
@@ -185,11 +201,16 @@ uninstall() {
       dnf -y remove $pkgs
     fi
     rm -f /etc/yum.repos.d/emcomm-*.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
+    for k in "gpg-pubkey-$RPM_KEY_ID" "gpg-pubkey-$RPM_KEY_FPR"; do
+      if rpm -q "$k" >/dev/null 2>&1; then
+        rpmkeys --delete "$RPM_KEY_FPR" >/dev/null 2>&1 || rpm -e --allmatches "$k"  # rpm 6 || rpm 4
+      fi
+    done
   fi
   rm -f /etc/systemd/user/emcomm-*.service /etc/udev/rules.d/70-emcomm-*.rules
   rm -rf /etc/emcomm /opt/emcomm
   udevadm control --reload 2>/dev/null || true
-  echo "emcommOS removed. Group memberships (dialout, audio) and chrony were left in place."
+  echo "emcommOS removed. Per-user files listed above, group memberships (dialout, audio) and chrony were left in place."
 }
 
 if [ "$UNINSTALL" -eq 1 ]; then

@@ -48,10 +48,16 @@ n=$(gpg --batch --show-keys --with-colons $KEYRING | grep -c "^pub:")
 echo "== (c) rejects http and bad channel"
 sh /src/bootstrap.sh --repo-url http://x --yes 2>&1 | grep -q "non-HTTPS" || fail "http accepted"
 sh /src/bootstrap.sh --repo-url https://x --channel "a/b" --yes 2>&1 | grep -q "invalid channel" || fail "bad channel"
+for ts in "core;id" "core,,digital" "Core" "../x" ""; do
+  sh /src/bootstrap.sh --repo-url https://x --toolsets "$ts" --yes 2>&1 | grep -q "invalid toolsets" || fail "toolsets $ts accepted"
+done
 
 echo "== (d) uninstall preview, nothing installed"
 rm -f $KEYRING /etc/apt/sources.list.d/emcomm.sources
-sh /src/bootstrap.sh --uninstall --yes
+out=$(sh /src/bootstrap.sh --uninstall --yes); echo "$out"
+for want in "~/.config/emcomm" "60-emcomm-\*.conf" "systemctl --user disable --now emcomm-rigctld emcomm-direwolf emcomm-pat"; do
+  echo "$out" | grep -q -- "$want" || fail "uninstall summary does not mention $want"
+done
 
 mk() { d=/t/$1; mkdir -p $d/DEBIAN
   printf "Package: $1\nVersion: 1\nArchitecture: all\nMaintainer: a <a@b>\nDescription: t\n${2:+Depends: $2\n}" > $d/DEBIAN/control
