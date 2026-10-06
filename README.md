@@ -61,8 +61,9 @@ systemctl --user restart pipewire pipewire-pulse wireplumber   # creates emcomm-
 systemctl --user restart emcomm-rigctld                        # start wfview first
 ```
 
-wfview's rigctld server listens on all interfaces without a password: block TCP 4533 in your
-firewall on untrusted networks.
+emcomm's wfview build serves rigctld on localhost only. A wfview from elsewhere (distro package,
+upstream binary) binds all interfaces without a password: block TCP 4533 in your firewall on
+untrusted networks. Start or restart wfview after `emcomm use`; it overwrites wfview.conf on exit.
 
 ### Your own machine (BYOD)
 

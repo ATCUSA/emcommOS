@@ -6,6 +6,13 @@ QMAKE=$(command -v qmake6 || command -v qmake-qt6 || echo /usr/lib64/qt6/bin/qma
 # Qt >= 6.9 QMultiMap::remove(key, value) compares through a const reference; upstream's
 # queueItem::operator== is not const (fails to compile on Fedora 44). Idempotent.
 sed -i 's/bool operator==(const queueItem& lhs)$/& const/' include/cachingqueue.h
+grep -q 'operator==(const queueItem& lhs) const' include/cachingqueue.h || {
+  echo "wfview const patch did not apply" >&2; exit 1; }
+# wfview's rigctld-compatible server binds all interfaces without authentication; the emcomm hub
+# is the only client, so bind loopback only. (Other servers and the Icom LAN link are untouched.)
+sed -i 's/listen(QHostAddress::Any, port)/listen(QHostAddress::LocalHost, port)/' src/rigctld.cpp
+grep -q 'listen(QHostAddress::LocalHost, port)' src/rigctld.cpp || {
+  echo "wfview rigctld bind patch did not apply" >&2; exit 1; }
 mkdir -p build
 cd build
 "$QMAKE" ../wfview.pro PREFIX="$PREFIX" VERSION="$VERSION" CONFIG+=release

@@ -50,6 +50,7 @@ def test_control_round_trip():
 def test_station_add_and_use_with_wfview(paths, monkeypatch, capsys):
     from emcomm.commands import use as use_cmd
     monkeypatch.setattr(use_cmd, "restart_services", lambda: True)
+    monkeypatch.setattr(use_cmd, "EMCOMM_WFVIEW", paths.home / "no-such-wfview")
     add_tty(paths.sysfs, make_usb(paths.sysfs, "1-1", "0c26", "0000", product="IC-7300MK2"),
             "ttyACM0")
     add_sound(paths.sysfs, make_usb(paths.sysfs, "1-2", "08bb", "2901"), "card1")
@@ -61,4 +62,21 @@ def test_station_add_and_use_with_wfview(paths, monkeypatch, capsys):
     assert main(["use", "K7ABC", "--station", "mk2", "--yes"], paths=paths) == 0
     assert "EnableRigCtlD=true" in (paths.home / ".config/wfview/wfview.conf").read_text()
     assert "-r 127.0.0.1:4533" in (paths.home / ".config/emcomm/rigctld.env").read_text()
-    assert "TCP 4533" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "TCP 4533" in err and "restart wfview after `emcomm use`" in err
+
+
+def test_no_exposure_warning_for_emcomm_wfview(paths, monkeypatch, capsys):
+    from emcomm.commands import use as use_cmd
+    fake = paths.home / "wfview"
+    fake.parent.mkdir(parents=True)
+    fake.write_text("")
+    monkeypatch.setattr(use_cmd, "EMCOMM_WFVIEW", fake)
+    monkeypatch.setattr(use_cmd, "restart_services", lambda: True)
+    assert main(["operator", "add", "K7ABC"], paths=paths) == 0
+    assert main(["station", "add", "mk2", "--radio", "icom-ic7300mk2", "--control", "wfview",
+                 "--no-udev"], paths=paths) == 0
+    capsys.readouterr()
+    assert main(["use", "K7ABC", "--station", "mk2", "--yes"], paths=paths) == 0
+    err = capsys.readouterr().err
+    assert "TCP 4533" not in err and "restart wfview" in err

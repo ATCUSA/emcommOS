@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import datetime
+from pathlib import Path
 
 from ..apply import apply_changes, plan_changes, render_diff, restart_services, save_active
 from ..paths import Paths
@@ -12,6 +13,8 @@ from ..profiles import load_operator, load_station
 from ..radios import load_radios
 from ..render.context import RenderContext
 from ..validation import ProfileError
+
+EMCOMM_WFVIEW = Path("/opt/emcomm/bin/wfview")  # tests monkeypatch this
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -58,9 +61,12 @@ def cmd_use(args: argparse.Namespace, paths: Paths) -> int:
         print("note: could not restart emcomm user services; restart them yourself if running",
               file=sys.stderr)
     if station.control == "wfview":
-        print("warning: wfview's rigctld server listens on all interfaces without a password; "
-              "block TCP 4533 in the firewall on untrusted networks. Start wfview before "
-              "emcomm-rigctld.", file=sys.stderr)
+        print("note: start or restart wfview after `emcomm use` (it overwrites wfview.conf on "
+              "exit), and before emcomm-rigctld.", file=sys.stderr)
+        if not EMCOMM_WFVIEW.exists():
+            print("warning: this wfview is not the emcomm build; its rigctld server listens on "
+                  "all interfaces without a password. Block TCP 4533 in the firewall on "
+                  "untrusted networks.", file=sys.stderr)
     if station.virtual_audio:
         print("note: restart PipeWire to create the virtual devices "
               "(systemctl --user restart pipewire pipewire-pulse wireplumber). In wfview, set "

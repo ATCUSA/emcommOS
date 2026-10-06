@@ -25,18 +25,15 @@ def rigctld_args(ctx: RenderContext) -> list[str]:
     if ctx.station.control == "wfview":
         # wfview owns the radio; the hub proxies its server so apps still use RIGCTLD_ADDR.
         args = ["-m", str(NET_RIGCTL_MODEL), "-r", WFVIEW_RIGCTL_ADDR, *hub]
-        for arg in args:
-            _validate_arg(arg)
-        return args
-
-    args = ["-m", str(ctx.radio.hamlib_model), *hub]
-    has_cat = ctx.station.cat is not None
-    if ctx.radio.hamlib_model != DUMMY_MODEL and has_cat:
-        args += ["-r", ctx.station.cat_link, "-s", str(ctx.radio.baud)]
-    if ctx.ptt in ("rts", "dtr") and has_cat:
-        args += ["-P", ctx.ptt.upper(), "-p", ctx.station.cat_link]
-    if ctx.radio.set_conf:
-        args.append("--set-conf=" + ",".join(f"{k}={v}" for k, v in ctx.radio.set_conf))
+    else:
+        args = ["-m", str(ctx.radio.hamlib_model), *hub]
+        has_cat = ctx.station.cat is not None
+        if ctx.radio.hamlib_model != DUMMY_MODEL and has_cat:
+            args += ["-r", ctx.station.cat_link, "-s", str(ctx.radio.baud)]
+        if ctx.ptt in ("rts", "dtr") and has_cat:
+            args += ["-P", ctx.ptt.upper(), "-p", ctx.station.cat_link]
+        if ctx.radio.set_conf:
+            args.append("--set-conf=" + ",".join(f"{k}={v}" for k, v in ctx.radio.set_conf))
 
     # Validate all arguments for dangerous characters
     for arg in args:

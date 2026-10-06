@@ -51,3 +51,19 @@ def test_pipewire_dropin_is_private(paths):
     apply_changes(paths, changes, datetime.now(UTC))
     dropin = paths.home / ".config/pipewire/pipewire.conf.d/60-emcomm-mk2.conf"
     assert stat.S_IMODE(dropin.stat().st_mode) == 0o600
+
+
+def test_switching_kit_removes_stale_dropin_with_backup(paths, monkeypatch):
+    from emcomm.commands import use as use_cmd
+    monkeypatch.setattr(use_cmd, "restart_services", lambda: True)
+    assert main(["operator", "add", "K7ABC"], paths=paths) == 0
+    for name in ("kita", "kitb"):
+        assert main(["station", "add", name, "--radio", "icom-ic7300mk2", "--control", "wfview",
+                     "--virtual-audio", "--no-udev"], paths=paths) == 0
+    d = paths.home / ".config/pipewire/pipewire.conf.d"
+    assert main(["use", "K7ABC", "--station", "kita", "--yes"], paths=paths) == 0
+    assert (d / "60-emcomm-kita.conf").is_file()
+    assert main(["use", "K7ABC", "--station", "kitb", "--yes"], paths=paths) == 0
+    assert not (d / "60-emcomm-kita.conf").exists() and (d / "60-emcomm-kitb.conf").is_file()
+    backups = list((paths.state / "backups").rglob("60-emcomm-kita.conf"))
+    assert len(backups) == 1 and "emcomm-kita-rx" in backups[0].read_text()

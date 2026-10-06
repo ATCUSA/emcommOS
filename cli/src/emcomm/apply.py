@@ -64,6 +64,7 @@ class FileChange:
     path: Path
     old: str | None
     new: str
+    delete: bool = False
 
 
 def _read(path: Path) -> str:
@@ -81,7 +82,22 @@ def plan_changes(paths: Paths, ctx: RenderContext) -> list[FileChange]:
         new = cfg.render(old, ctx)
         if new is not None and new != old:
             changes.append(FileChange(cfg.app, path, old, new))
+    changes.extend(_stale_dropins(paths, ctx, {c.path for c in changes}))
     return changes
+
+
+_DROPIN_GLOB = ".config/pipewire/pipewire.conf.d/60-emcomm-*.conf"
+
+
+def _stale_dropins(paths: Paths, ctx: RenderContext, skip: set[Path]) -> list[FileChange]:
+    """Drop-ins of other kits are emcomm-owned and stale once another station is active."""
+    keep = paths.home / ".config/pipewire/pipewire.conf.d" / f"60-emcomm-{ctx.station.name}.conf"
+    out = []
+    for path in sorted(paths.home.glob(_DROPIN_GLOB)):
+        if path == keep or path in skip:
+            continue
+        out.append(FileChange("pipewire", path, _read(_real(path)), "", delete=True))
+    return out
 
 
 def render_diff(changes: list[FileChange], home: Path) -> str:
@@ -90,7 +106,7 @@ def render_diff(changes: list[FileChange], home: Path) -> str:
         rel = c.path.relative_to(home).as_posix()
         out.extend(difflib.unified_diff(
             (c.old or "").splitlines(keepends=True), c.new.splitlines(keepends=True),
-            fromfile=f"a/{rel}", tofile=f"b/{rel}"))
+            fromfile=f"a/{rel}", tofile="/dev/null" if c.delete else f"b/{rel}"))
     return "".join(out)
 
 
@@ -150,6 +166,10 @@ def apply_changes(paths: Paths, changes: list[FileChange], now: datetime) -> Pat
     written: list[Path] = []
     for c, real in targets:
         rel = c.path.relative_to(paths.home)
+        if c.delete:
+            c.path.unlink(missing_ok=True)  # removes a symlink itself, not its target
+            written.append(c.path)
+            continue
         if c.old is not None:
             mode = real.stat().st_mode & 0o7777
         else:
