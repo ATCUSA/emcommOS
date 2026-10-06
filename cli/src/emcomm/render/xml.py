@@ -29,13 +29,16 @@ def set_xml_elements(text: str, root: str, values: Mapping[str, str]) -> str:
         # Match elements with optional attributes: <TAG...>content</TAG> or <TAG.../>
         # Use re.escape to handle special regex characters in tag names
         escaped_tag = re.escape(tag)
+        # Try self-closing first (higher priority) to avoid incorrect span to later </TAG>
+        # Self-closing: <TAG(\s[^>]*?)?\s*/> (non-greedy attrs, optional whitespace before />)
+        # Regular: <TAG(\s[^>]*?)?>.*?</TAG> (non-greedy attrs and content)
         pattern = re.compile(
-            rf"<{escaped_tag}(\s[^>]*)?>.*?</{escaped_tag}>|<{escaped_tag}(\s[^>]*)?\s*/>",
+            rf"<{escaped_tag}(\s[^>]*?)?\s*/>|<{escaped_tag}(\s[^>]*?)?>.*?</{escaped_tag}>",
             re.DOTALL
         )
 
         def replacer(match: re.Match, tag=tag, escaped_value=escaped_value) -> str:
-            # Extract attributes if present (group 1 for regular tags, group 2 for self-closing)
+            # Extract attributes (group 1 for self-closing, group 2 for regular)
             attrs = match.group(1) or match.group(2) or ""
             # Convert all matches (self-closing or regular) to regular elements with content
             return f"<{tag}{attrs}>{escaped_value}</{tag}>"

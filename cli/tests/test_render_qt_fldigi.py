@@ -98,6 +98,47 @@ def test_set_ini_keys_rejects_newline_in_value():
         set_ini_keys("[C]\n", "C", {"K": "val\rue"})
 
 
+def test_set_ini_keys_critical_append_no_glue_lf():
+    # CRITICAL: appended keys must not glue when last line lacks terminator (LF)
+    result = set_ini_keys("[C]\nk=v", "C", {"K2": "v2"})
+    assert result == "[C]\nk=v\nK2=v2\n"
+    # Verify they're on separate lines
+    assert "\nK2=" in result
+
+
+def test_set_ini_keys_critical_append_no_glue_crlf():
+    # CRITICAL: appended keys must not glue when last line lacks terminator (CRLF)
+    result = set_ini_keys("[C]\r\nk=v", "C", {"K2": "v2"})
+    assert result == "[C]\r\nk=v\r\nK2=v2\r\n"
+    # Verify they're on separate lines
+    assert "\r\nK2=" in result
+
+
+def test_set_ini_keys_new_section_no_spurious_blank_lf():
+    # New section: blank line only when last existing line is non-blank (LF)
+    result = set_ini_keys("[A]\nx=1\n\n", "C", {"a": "1"})
+    assert result == "[A]\nx=1\n\n[C]\na=1\n"
+    # Don't add extra blank line since last line is already blank
+
+
+def test_set_ini_keys_new_section_blank_when_needed_lf():
+    # New section: blank line when last existing line is non-blank (LF)
+    result = set_ini_keys("[A]\nx=1\n", "C", {"a": "1"})
+    assert result == "[A]\nx=1\n\n[C]\na=1\n"
+
+
+def test_set_ini_keys_new_section_bom_only_no_blank():
+    # BOM-only file: no spurious blank lines before new section
+    result = set_ini_keys("﻿", "C", {"a": "1"})
+    assert result == "﻿[C]\na=1\n"
+
+
+def test_set_ini_keys_new_section_empty_file():
+    # Empty file: no spurious blank lines
+    result = set_ini_keys("", "C", {"a": "1"})
+    assert result == "[C]\na=1\n"
+
+
 def test_wsjtx_render():
     out = render_wsjtx((FIX / "WSJT-X.ini").read_text(), ctx())
     lines = out.splitlines()
@@ -141,11 +182,24 @@ def test_set_xml_elements_with_attributes():
 
 
 def test_set_xml_elements_self_closing_tag():
-    # Self-closing tag should be handled and converted to regular element
+    # Self-closing tag should be handled and converted to regular element (byte-exact)
     text = "<ROOT>\n<EMPTY attr=\"val\" />\n</ROOT>\n"
     out = set_xml_elements(text, "ROOT", {"EMPTY": "content"})
-    # Self-closing tag is converted to regular element, preserving attributes
-    assert "<EMPTY attr=\"val\"" in out and ">content</EMPTY>" in out
+    # Byte-exact: self-closing converted to regular element with attributes preserved
+    assert out == "<ROOT>\n<EMPTY attr=\"val\">content</EMPTY>\n</ROOT>\n"
+
+
+def test_set_xml_elements_mixed_self_closing_and_regular():
+    # Mixed: self-closing and regular tags of same name should both be handled correctly
+    text = "<R>\n<T a=\"1\"/>\n<T>q</T>\n</R>\n"
+    out = set_xml_elements(text, "R", {"T": "new"})
+    # Self-closing tag converted, regular tag updated
+    # Both should be well-formed and contain the new value
+    assert "<T" in out and "new</T>" in out
+    # Verify output is well-formed (closes all tags)
+    assert out.count("<T") == out.count("</T>")
+    # At least one should have the new value
+    assert "new" in out
 
 
 def test_set_xml_elements_tag_substring():

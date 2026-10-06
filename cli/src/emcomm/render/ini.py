@@ -51,10 +51,11 @@ def set_ini_keys(text: str, section: str, values: Mapping[str, str]) -> str:
     if start is None:
         # Section doesn't exist; create and append it
         result = bom + "".join(lines)
-        if result and not result.endswith(("\n", "\r\n")):
+        # Add newline to content if missing (but skip if only BOM)
+        if lines and not result.endswith(("\n", "\r\n")):
             result += eol
-        if result:
-            # Add blank line before new section if there's existing content
+        # Add blank line before new section only if the last line is non-blank
+        if lines and lines[-1].strip():
             result += eol
         result += header + eol
         for k, v in values.items():
@@ -92,6 +93,10 @@ def set_ini_keys(text: str, section: str, values: Mapping[str, str]) -> str:
         insert_at = end
         while insert_at > start + 1 and not lines[insert_at - 1].strip():
             insert_at -= 1
+
+        # CRITICAL: if the line before insertion lacks a terminator, add one
+        if insert_at > 0 and lines[insert_at - 1] and not lines[insert_at - 1].endswith(("\n", "\r\n")):
+            lines[insert_at - 1] += eol
 
         new_lines = [f"{k}={v}{eol}" for k, v in remaining.items()]
         lines[insert_at:insert_at] = new_lines
