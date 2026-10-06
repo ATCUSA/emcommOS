@@ -109,7 +109,10 @@ def report(entries: dict[str, dict], *, tags=list_tags, deb=debian_versions,
                     "?",
                     source=f"{name} fedora-{rel}"
                 )
-            row[f"f{rel}"] = v if e.get("fedora") else "-"
+                # Convert None (not packaged) to "-", keep "?" (error) as is
+                row[f"f{rel}"] = v if v is not None else "-"
+            else:
+                row[f"f{rel}"] = "-"
 
         # Mark rows where distro matches upstream
         for key in (*SUITES, *(f"f{r}" for r in FEDORA)):

@@ -1,5 +1,7 @@
+import argparse
 import urllib.error
 
+from emcomm_build.cli import cmd_freshness
 from emcomm_build.freshness import debian_versions, fedora_version, report
 from emcomm_build.model import Upstream
 
@@ -137,3 +139,54 @@ def test_report_tags_key_error(capsys):
 
     captured = capsys.readouterr()
     assert "pkg-a upstream" in captured.err
+
+
+def test_report_fedora_none_not_packaged(capsys):
+    """Fed returning None (not packaged) shows "-", not None."""
+    def fed_returns_none(pkg, rel):
+        return None
+    
+    entries = {"pkg-a": {"upstream": Upstream("github-releases", r"v(\d+\.\d+\.\d+)", repo="x"),
+                         "debian": "pkg-a", "fedora": "pkg-a"}}
+    rows = report(entries, tags=lambda up: ["v1.0.0"],
+                  deb=lambda pkg: {"trixie": "1.0.0", "trixie-backports": "1.0.0"},
+                  fed=fed_returns_none)
+    
+    assert rows[0]["f43"] == "-"  # None from fed() becomes "-"
+    assert rows[0]["f44"] == "-"
+    
+    captured = capsys.readouterr()
+    assert captured.err == ""  # No error warnings
+
+
+def test_cmd_freshness_formatting(capsys, monkeypatch, tmp_path):
+    """cmd_freshness formatting handles "-" and "?" without TypeError."""
+    # Mock report to return rows with "-" and "?" values
+    mock_rows = [
+        {"app": "app-a", "upstream": "1.0.0", "trixie": "1.0.0", "trixie-backports": "-",
+         "f43": "?", "f44": "-"},
+        {"app": "app-b", "upstream": "?", "trixie": "?", "trixie-backports": "?",
+         "f43": "-", "f44": "1.0.0"},
+    ]
+    
+    def mock_report(entries):
+        return mock_rows
+    
+    def mock_load_entries(root):
+        return {}
+    
+    monkeypatch.setattr("emcomm_build.cli.report", mock_report)
+    monkeypatch.setattr("emcomm_build.cli.load_entries", mock_load_entries)
+    monkeypatch.setattr("emcomm_build.cli.repo_root", lambda: tmp_path)
+    
+    args = argparse.Namespace()
+    result = cmd_freshness(args)
+    
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "app-a" in captured.out
+    assert "app-b" in captured.out
+    assert "-" in captured.out
+    assert "?" in captured.out
+    # Verify no TypeError in formatting
+    assert "TypeError" not in captured.out and "TypeError" not in captured.err
