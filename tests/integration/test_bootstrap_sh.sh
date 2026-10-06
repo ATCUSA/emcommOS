@@ -59,5 +59,19 @@ sh /src/bootstrap.sh --uninstall --yes 2>&1 | grep -E "^    |removed\."
 dpkg -s emcomm-fake >/dev/null 2>&1 && fail "emcomm-fake still installed"
 dpkg -s dep-lib >/dev/null 2>&1 && fail "newly orphaned dep-lib still installed"
 dpkg -s orphan-pre >/dev/null 2>&1 || fail "pre-existing orphan was removed"
+echo "== (g) package that becomes unneeded outside the confirmed list is not purged"
+mk dep-lib2; mk emcomm-fake2 dep-lib2; mk bystander
+dpkg -i /t/dep-lib2.deb /t/emcomm-fake2.deb /t/bystander.deb >/dev/null
+apt-mark auto dep-lib2 >/dev/null; apt-mark manual emcomm-fake2 bystander >/dev/null
+mkdir -p /shim
+printf "#!/bin/sh\n/usr/bin/apt-get \"\$@\"; rc=\$?\n[ \"\$1\" = remove ] && apt-mark auto bystander >/dev/null\nexit \$rc\n" > /shim/apt-get
+chmod +x /shim/apt-get; rm -f /shim/apt-mark
+out=$(PATH=/shim:$PATH sh /src/bootstrap.sh --uninstall --yes 2>&1)
+echo "$out" | grep -A2 "^warning"
+echo "$out" | grep -q "^warning: these packages became unneeded" || fail "no warning"
+dpkg -s bystander >/dev/null 2>&1 || fail "bystander was purged"
+dpkg -s emcomm-fake2 >/dev/null 2>&1 && fail "emcomm-fake2 still installed"
+dpkg -s dep-lib2 >/dev/null 2>&1 && fail "dep-lib2 still installed"
+dpkg -s orphan-pre >/dev/null 2>&1 || fail "pre-existing orphan was removed"
 echo "PASS"
 '

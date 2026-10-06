@@ -88,11 +88,14 @@ uninstall() {
   echo "Your files in ~/.config and app settings are kept; group memberships and chrony stay."
   pkgs=""; MODE="none"
   if [ "$FAMILY" = debian ]; then
-    pkgs=$(dpkg-query -W -f='${db:Status-Abbrev}${Package}\n' 'emcomm-*' 2>/dev/null \
-           | awk '/^(ii|hi|rc)/ {print substr($0, 4)}' | tr -d ' ') || preview_fail dpkg-query
+    command -v dpkg-query >/dev/null 2>&1 || preview_fail "dpkg-query not found"
+    rc=0; dq=$(dpkg-query -W -f='${db:Status-Abbrev}${Package}\n' 'emcomm-*' 2>/dev/null) || rc=$?
+    [ "$rc" -le 1 ] || preview_fail "dpkg-query failed"
+    pkgs=$(printf '%s\n' "$dq" | awk '/^(ii|hi|rc)/ {print substr($0, 4)}' | tr -d ' ')
     if [ -n "$pkgs" ]; then
       base_out=$(apt-get -s autoremove) || preview_fail "apt-get autoremove simulation"
       baseline=$(printf '%s\n' "$base_out" | awk '/^Remv / {print $2}' | sort -u)
+      baseline=$(set_diff "$baseline" "$pkgs")  # our own packages are never "pre-existing"
       # shellcheck disable=SC2086
       plan_out=$(apt-get -s remove --purge --auto-remove $pkgs) || preview_fail "apt-get simulation"
       plan=$(printf '%s\n' "$plan_out" | awk '/^(Remv|Purg) / {print $2}' | sort -u)
@@ -136,11 +139,18 @@ uninstall() {
       split)
         # shellcheck disable=SC2086
         apt-get remove --purge -y $pkgs
-        after_out=$(apt-get -s autoremove) || die "could not list newly unneeded packages"
+        after_out=$(apt-get -s autoremove) || die "emcomm packages were already removed, but the follow-up list of unneeded dependencies failed; run apt-get autoremove yourself if wanted"
         after=$(printf '%s\n' "$after_out" | awk '/^Remv / {print $2}' | sort -u)
         new=$(set_diff "$after" "$baseline")
+        extra=$(set_diff "$new" "$todo")
+        mine=$(set_diff "$new" "$extra")
+        if [ -n "$extra" ]; then
+          echo "warning: these packages became unneeded but were not in the confirmed list;" >&2
+          echo "  leaving them installed (run 'apt-get autoremove' if you want them gone):" >&2
+          printf '%s\n' "$extra" | sed 's/^/    /' >&2
+        fi
         # shellcheck disable=SC2086
-        [ -z "$new" ] || apt-get purge -y $new ;;
+        [ -z "$mine" ] || apt-get purge -y $mine ;;
     esac
     rm -f /etc/apt/sources.list.d/emcomm.sources /etc/apt/sources.list.d/emcomm-backports.sources \
           /etc/apt/preferences.d/emcomm-backports.pref /usr/share/keyrings/emcomm-archive-keyring.asc
@@ -195,7 +205,7 @@ fpr=$(printf '%s\n' "$keys" | awk -F: '/^fpr/ {print $10; exit}')
 GNUPGHOME="$tmp" gpg --batch --import "$tmp/key.asc" 2>/dev/null
 GNUPGHOME="$tmp" gpg --batch --armor --export "$EMCOMM_KEY_FINGERPRINT" > "$tmp/pinned.asc"
 [ -s "$tmp/pinned.asc" ] || die "could not export the pinned key"
-[ "$(gpg --batch --show-keys --with-colons "$tmp/pinned.asc" 2>/dev/null | grep -c '^pub:')" -eq 1 ] ||
+[ "$(GNUPGHOME="$tmp" gpg --batch --show-keys --with-colons "$tmp/pinned.asc" 2>/dev/null | grep -c '^pub:')" -eq 1 ] ||
   die "exported key file does not contain exactly one key"
 
 if [ "$FAMILY" = debian ]; then
