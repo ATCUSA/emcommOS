@@ -5,11 +5,11 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .commands import operator, radios
+from .commands import operator, radios, station
 from .paths import Paths
 from .validation import ProfileError
 
-COMMANDS = [operator, radios]
+COMMANDS = [operator, radios, station]
 
 
 def build_parser() -> argparse.ArgumentParser:

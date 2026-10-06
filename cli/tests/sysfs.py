@@ -31,3 +31,11 @@ def add_sound(sysfs: Path, iface_dir: Path, name: str) -> None:
     node.mkdir(parents=True)
     (sysfs / "class/sound").mkdir(parents=True, exist_ok=True)
     (sysfs / "class/sound" / name).symlink_to(node)
+
+
+def add_acm(sysfs: Path, iface_dir: Path, name: str) -> None:
+    """Real CDC-ACM layout: <iface>/tty/<name> directly, no intermediate <name>/ dir."""
+    node = iface_dir / "tty" / name
+    node.mkdir(parents=True)
+    (sysfs / "class/tty").mkdir(parents=True, exist_ok=True)
+    (sysfs / "class/tty" / name).symlink_to(node)

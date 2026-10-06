@@ -1,5 +1,5 @@
 import pytest
-from sysfs import add_sound, add_tty, make_usb
+from sysfs import add_acm, add_sound, add_tty, make_usb
 
 from emcomm.detect import candidates, find_node, hint_matches, scan, to_match
 from emcomm.models import UsbHint
@@ -50,3 +50,11 @@ def test_to_match(ic7300_and_ft991a):
     assert (tty.vendor_id, tty.product_id, tty.interface) == ("10c4", "ea70", "00")
     snd = to_match(find_node(devices, "sound", "card1"))
     assert snd.interface == ""
+
+
+def test_scan_cdc_acm_layout(tmp_path):
+    sysfs = tmp_path / "sys"
+    add_acm(sysfs, make_usb(sysfs, "1-4", "0c26", "0036", "IC7300MK2 01", "IC-7300MK2"), "ttyACM0")
+    (found,) = scan(sysfs)
+    assert (found.node, found.kind) == ("ttyACM0", "tty")
+    assert (found.vendor_id, found.product, found.interface) == ("0c26", "IC-7300MK2", "00")
