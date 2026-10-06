@@ -97,8 +97,8 @@ backports source and pin, emcomm user units and udev rules, and `/etc/emcomm`. Y
   (optional; otherwise install them yourself). Podman comes from your distro.
 - Build tooling (Python, uv): `uv run --directory tools pytest -q`; build packages with
   `uv run --directory tools emcomm-build build --target debian-13` (needs podman and nfpm;
-  CI gets both from the `.github/actions/setup-build-host` composite action, a Nix dev shell
-  will follow).
+  `nix develop` provides nfpm, and CI gets podman and the same nfpm version from the
+  `.github/actions/setup-build-host` composite action).
 - CLI: `uv run --directory cli pytest -q`.
 - Ansible: see `ansible/requirements-dev.txt`; `molecule test` in the collection directory.
 - Acceptance (needs podman, network and a published repo):

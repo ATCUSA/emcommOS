@@ -11,6 +11,8 @@
     {
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
+          # nfpm (2.46.3 at the locked nixpkgs) must match NFPM_VERSION in
+          # .github/actions/setup-build-host/action.yml: move them together.
           packages = with pkgs; [ python312 uv nfpm shellcheck actionlint gnupg rclone git jq ];
           shellHook = ''
             export UV_PYTHON=${pkgs.python312}/bin/python3
