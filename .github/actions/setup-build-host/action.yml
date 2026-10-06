@@ -1,15 +1,29 @@
 name: setup-build-host
-description: Install podman and nfpm on an Ubuntu runner
+description: Install podman (and optionally nfpm, sha256-pinned) on an Ubuntu runner
+inputs:
+  nfpm:
+    description: Install nfpm
+    default: "true"
 runs:
   using: composite
   steps:
     - shell: bash
+      env:
+        INSTALL_NFPM: ${{ inputs.nfpm }}
       run: |
         set -euo pipefail
         command -v podman >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq podman; }
-        NFPM_VERSION=2.41.1
-        case "$(uname -m)" in x86_64) a=x86_64 ;; aarch64) a=arm64 ;; esac
-        curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${a}.tar.gz" \
-          | sudo tar -xz -C /usr/local/bin nfpm
         podman --version
+        [ "$INSTALL_NFPM" = "true" ] || exit 0
+        NFPM_VERSION=2.41.1
+        case "$(uname -m)" in
+          x86_64) a=x86_64; sum=b3cf95aa6dabed836d09ad7f0c190a13c74c5b1304db60846f0f702ee407f430 ;;
+          aarch64) a=arm64; sum=17350a838c8e2c422c6e573ed379b18424565d2de8a2b1cb1b20211976124eb5 ;;
+          *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+        esac
+        tgz="$RUNNER_TEMP/nfpm.tar.gz"
+        curl -fsSL -o "$tgz" "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${a}.tar.gz"
+        echo "${sum}  ${tgz}" | sha256sum -c -
+        sudo tar -xzf "$tgz" -C /usr/local/bin nfpm
+        rm -f "$tgz"
         nfpm --version

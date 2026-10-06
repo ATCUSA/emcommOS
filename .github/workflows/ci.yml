@@ -5,12 +5,18 @@ on:
     branches: [main]
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   python:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: uv run --directory tools ruff check .
       - run: uv run --directory tools pytest -q -m "not container and not nfpm"
       - run: uv run --directory tools emcomm-build validate
@@ -18,31 +24,43 @@ jobs:
       - run: uv run --directory cli pytest -q
   shell:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - run: >
           shellcheck bootstrap.sh tools/container/*.sh recipes/*/*.sh tests/integration/*.sh
           recipes/base/files/opt/emcomm/libexec/emcomm-run
   packaging-integration:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - uses: ./.github/actions/setup-build-host
       - run: uv run --directory tools pytest -q -m "container or nfpm"
   bootstrap:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-build-host
       - run: sh tests/integration/test_bootstrap_sh.sh
   ansible:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     env:
       ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/ansible
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       - run: pip install -r ansible/requirements-dev.txt && ansible-galaxy collection install containers.podman

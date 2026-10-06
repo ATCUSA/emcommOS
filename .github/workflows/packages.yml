@@ -19,43 +19,63 @@ jobs:
         target: [debian-13, fedora-44, fedora-43]
         arch: [amd64, arm64]
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 120
+    env:
+      # May be empty: build then treats nothing as published and builds everything.
+      EMCOMM_REPO_URL: ${{ vars.EMCOMM_REPO_URL }}
+      TARGET: ${{ matrix.target }}
+      ARCH: ${{ matrix.arch }}
+      FORCE: ${{ inputs.force && '--force' || '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - uses: ./.github/actions/setup-build-host
-      - name: Build ${{ matrix.target }}/${{ matrix.arch }}
-        run: >
-          uv run --directory tools emcomm-build build
-          --target ${{ matrix.target }} --arch ${{ matrix.arch }}
-          --repo-url "${{ vars.EMCOMM_REPO_URL }}"
-          --out "$GITHUB_WORKSPACE/dist/${{ matrix.target }}/${{ matrix.arch }}"
-          ${{ inputs.force && '--force' || '' }}
-      - uses: actions/upload-artifact@v4
+      - name: Build
+        run: |
+          set -euo pipefail
+          # FORCE is intentionally unquoted: empty means no argument.
+          # shellcheck disable=SC2086
+          uv run --directory tools emcomm-build build \
+            --target "$TARGET" --arch "$ARCH" \
+            --repo-url "$EMCOMM_REPO_URL" \
+            --out "$GITHUB_WORKSPACE/dist/$TARGET/$ARCH" \
+            $FORCE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pkgs-${{ matrix.target }}-${{ matrix.arch }}
           path: dist/
           if-no-files-found: ignore
 
+  # Publishing is restricted to main. Recommended follow-up for the maintainer: put
+  # publish behind a GitHub Environment with a main-only deployment branch rule and
+  # move the R2 and signing secrets into that environment.
   publish:
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     concurrency:
       group: publish-testing
       cancel-in-progress: false
     env:
-      RCLONE_CONFIG_R2_TYPE: s3
-      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
-      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
       BUCKET: ${{ vars.R2_BUCKET }}
+      EMCOMM_REPO_URL: ${{ vars.EMCOMM_REPO_URL }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - name: Require configuration
+        run: |
+          [ -n "$EMCOMM_REPO_URL" ] || { echo "::error::GitHub variable EMCOMM_REPO_URL is empty"; exit 1; }
+          [ -n "$BUCKET" ] || { echo "::error::GitHub variable R2_BUCKET is empty"; exit 1; }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - uses: ./.github/actions/setup-build-host
-      - run: sudo apt-get install -y -qq rclone
-      - uses: actions/download-artifact@v4
+        with:
+          nfpm: "false"
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: pkgs-*
           path: dist
@@ -64,6 +84,14 @@ jobs:
         run: echo "n=$(find dist \( -name '*.deb' -o -name '*.rpm' \) 2>/dev/null | wc -l)" >> "$GITHUB_OUTPUT"
       - name: Fetch current channel tree
         if: steps.count.outputs.n != '0'
+        env: &r2
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+          BUCKET: ${{ vars.R2_BUCKET }}
         run: mkdir -p public/testing && rclone sync "r2:$BUCKET/testing" public/testing
       - name: Write signing key
         if: steps.count.outputs.n != '0'
@@ -82,21 +110,32 @@ jobs:
           --key-file "$RUNNER_TEMP/signing.asc" --passphrase-file "$RUNNER_TEMP/passphrase"
       - name: Upload
         if: steps.count.outputs.n != '0'
+        env: *r2
         run: rclone sync public/testing "r2:$BUCKET/testing"
       - name: Upload bootstrap.sh
+        env: *r2
         run: rclone copyto bootstrap.sh "r2:$BUCKET/bootstrap.sh"
       - name: Remove key material
         if: always()
         run: rm -f "$RUNNER_TEMP/signing.asc" "$RUNNER_TEMP/passphrase"
 
+  # tests/integration/repo-install.sh is created by Task 27.
   verify:
     needs: publish
+    if: github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
         target: [debian-13, fedora-44, fedora-43]
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EMCOMM_REPO_URL: ${{ vars.EMCOMM_REPO_URL }}
+      TARGET: ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v4
+      - run: '[ -n "$EMCOMM_REPO_URL" ] || { echo "::error::GitHub variable EMCOMM_REPO_URL is empty"; exit 1; }'
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup-build-host
-      - run: tests/integration/repo-install.sh ${{ matrix.target }} "${{ vars.EMCOMM_REPO_URL }}" testing
+      - run: tests/integration/repo-install.sh "$TARGET" "$EMCOMM_REPO_URL" testing

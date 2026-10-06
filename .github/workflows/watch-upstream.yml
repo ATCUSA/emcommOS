@@ -3,20 +3,27 @@ on:
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
-permissions:
-  contents: write
-  pull-requests: write
+# Needs repo setting "Allow GitHub Actions to create and approve pull requests".
+# PRs opened with GITHUB_TOKEN do not trigger ci; close and reopen the PR to run it.
+permissions: {}
 jobs:
   check:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: uv run --directory tools emcomm-build check --write
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: peter-evans/create-pull-request@v7
+      - uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
+          add-paths: recipes/**
           branch: bot/upstream-bumps
           title: "Upstream version bumps"
           commit-message: "chore(recipes): bump upstream versions"
