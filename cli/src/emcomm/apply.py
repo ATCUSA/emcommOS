@@ -166,21 +166,20 @@ def apply_changes(paths: Paths, changes: list[FileChange], now: datetime) -> Pat
     written: list[Path] = []
     for c, real in targets:
         rel = c.path.relative_to(paths.home)
-        if c.delete:
-            c.path.unlink(missing_ok=True)  # removes a symlink itself, not its target
-            written.append(c.path)
-            continue
-        if c.old is not None:
-            mode = real.stat().st_mode & 0o7777
-        else:
-            mode = 0o600 if _is_private_new(rel.as_posix()) else None
         try:
-            _write(real, c.new, mode)
+            if c.delete:
+                c.path.unlink(missing_ok=True)  # removes a symlink itself, not its target
+            else:
+                if c.old is not None:
+                    mode = real.stat().st_mode & 0o7777
+                else:
+                    mode = 0o600 if _is_private_new(rel.as_posix()) else None
+                _write(real, c.new, mode)
         except OSError as exc:
             pending = [str(x.path) for x, _ in targets if x.path not in written
                        and x.path != c.path]
             raise ProfileError(
-                f"failed writing {c.path}: {exc}. "
+                f"failed {'removing' if c.delete else 'writing'} {c.path}: {exc}. "
                 f"already written: {', '.join(map(str, written)) or 'none'}; "
                 f"not written: {', '.join([str(c.path), *pending])}. "
                 f"Originals are in {backup}; restore by copying them back under {paths.home}."

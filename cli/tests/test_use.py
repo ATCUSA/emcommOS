@@ -209,3 +209,32 @@ def test_use_without_direwolf_does_not_warn(paths, ready, capsys):
     capsys.readouterr()
     assert main(["use", "K7ABC", "--station", "bench", "--yes"], paths=paths) == 0
     assert "AGW port 8000" not in capsys.readouterr().err
+
+
+def test_partial_failure_reports_failed_delete(paths, monkeypatch):
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from emcomm.apply import FileChange, apply_changes
+    from emcomm.validation import ProfileError
+    a, d, b = (paths.home / n for n in ("a.txt", "d.conf", "b.txt"))
+    a.parent.mkdir(parents=True, exist_ok=True)
+    for f, text in ((a, "a0"), (d, "d0"), (b, "b0")):
+        f.write_text(text)
+    real_unlink = Path.unlink
+
+    def flaky(self, missing_ok=False):
+        if self == d:
+            raise PermissionError("read-only")
+        return real_unlink(self, missing_ok=missing_ok)
+    monkeypatch.setattr(Path, "unlink", flaky)
+    changes = [_change(paths, "a.txt", "a0", "a1"),
+               FileChange("pipewire", d, "d0", "", delete=True),
+               _change(paths, "b.txt", "b0", "b1")]
+    with pytest.raises(ProfileError) as ei:
+        apply_changes(paths, changes, datetime(2026, 1, 1, tzinfo=UTC))
+    msg = str(ei.value)
+    assert f"failed removing {d}" in msg
+    assert f"already written: {a}" in msg and f"not written: {d}, {b}" in msg
+    assert "Originals are in" in msg
+    assert a.read_text() == "a1" and d.read_text() == "d0" and b.read_text() == "b0"
