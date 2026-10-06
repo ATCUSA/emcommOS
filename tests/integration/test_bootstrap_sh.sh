@@ -38,5 +38,26 @@ sh /src/bootstrap.sh --repo-url https://x --channel "a/b" --yes 2>&1 | grep -q "
 echo "== (d) uninstall preview, nothing installed"
 rm -f $KEYRING /etc/apt/sources.list.d/emcomm.sources
 sh /src/bootstrap.sh --uninstall --yes
+
+mk() { d=/t/$1; mkdir -p $d/DEBIAN
+  printf "Package: $1\nVersion: 1\nArchitecture: all\nMaintainer: a <a@b>\nDescription: t\n${2:+Depends: $2\n}" > $d/DEBIAN/control
+  dpkg-deb -b $d /t/$1.deb >/dev/null; }
+mk orphan-pre; mk dep-lib; mk emcomm-fake dep-lib
+dpkg -i /t/orphan-pre.deb /t/dep-lib.deb /t/emcomm-fake.deb >/dev/null
+apt-mark auto orphan-pre dep-lib >/dev/null; apt-mark manual emcomm-fake >/dev/null
+
+echo "== (f) failing preview refuses and removes nothing"
+mkdir /shim; printf "#!/bin/sh\nexit 1\n" > /shim/apt-mark; chmod +x /shim/apt-mark
+rc=0; out=$(PATH=/shim:$PATH sh /src/bootstrap.sh --uninstall --yes 2>&1) || rc=$?
+echo "$out" | tail -2; echo "rc=$rc"
+[ "$rc" -ne 0 ] || fail "uninstall proceeded with a failing preview"
+echo "$out" | grep -q "could not preview the removal; nothing was changed" || fail "no fail-closed message"
+dpkg -s emcomm-fake >/dev/null 2>&1 || fail "emcomm-fake was removed"
+
+echo "== (e) pre-existing orphan survives, new orphans go"
+sh /src/bootstrap.sh --uninstall --yes 2>&1 | grep -E "^    |removed\."
+dpkg -s emcomm-fake >/dev/null 2>&1 && fail "emcomm-fake still installed"
+dpkg -s dep-lib >/dev/null 2>&1 && fail "newly orphaned dep-lib still installed"
+dpkg -s orphan-pre >/dev/null 2>&1 || fail "pre-existing orphan was removed"
 echo "PASS"
 '

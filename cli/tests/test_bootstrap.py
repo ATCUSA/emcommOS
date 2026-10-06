@@ -84,3 +84,15 @@ def test_bootstrap_vars_reject_insecure_url_and_bad_channel():
         bs.bootstrap_vars("http://r", "testing", "core", [], {})
     with pytest.raises(ProfileError, match="channel"):
         bs.bootstrap_vars("https://r", "te/st", "core", [], {})
+
+
+def test_overrides_cannot_bypass_validation():
+    import pytest
+
+    from emcomm.validation import ProfileError
+    with pytest.raises(ProfileError):
+        bs.bootstrap_vars("https://r", "testing", "core", [], {"emcomm_repo_url": "http://evil"})
+    with pytest.raises(ProfileError):
+        bs.bootstrap_vars("https://r", "testing", "core", [], {"emcomm_channel": ".."})
+    with pytest.raises(ProfileError):
+        bs.bootstrap_vars("https://r\nx", "testing", "core", [], {})

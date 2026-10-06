@@ -47,17 +47,21 @@ def parse_overrides(items: list[str]) -> dict:
 
 def bootstrap_vars(repo_url: str, channel: str, toolsets: str, users: list[str],
                    overrides: dict) -> dict:
-    if not repo_url.startswith(("https://", "file://")):
-        raise ProfileError(f"refusing non-HTTPS repository URL: {repo_url}")
-    if not re.fullmatch(r"[a-z0-9._-]+", channel):
-        raise ProfileError(f"invalid channel {channel!r} (allowed: a-z 0-9 . _ -)")
-    return {
+    data = {
         "emcomm_repo_url": repo_url.rstrip("/"),
         "emcomm_channel": channel,
         "emcomm_toolsets": [t.strip() for t in toolsets.split(",") if t.strip()],
         "emcomm_users": users,
         **overrides,
     }
+    url, chan = data["emcomm_repo_url"], data["emcomm_channel"]
+    if not isinstance(url, str) or not url.startswith(("https://", "file://")):
+        raise ProfileError(f"refusing non-HTTPS repository URL: {url}")
+    if not re.fullmatch(r"[A-Za-z0-9._~:/%@+-]+", url):
+        raise ProfileError(f"repository URL contains unsupported characters: {url!r}")
+    if not isinstance(chan, str) or not re.fullmatch(r"[a-z0-9._-]+", chan) or chan in (".", ".."):
+        raise ProfileError(f"invalid channel {chan!r} (allowed: a-z 0-9 . _ -)")
+    return data
 
 
 def playbook_command(paths: Paths, vars_file: Path, check: bool) -> list[str]:

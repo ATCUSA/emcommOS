@@ -38,7 +38,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 REPO_URL=${REPO_URL%/}
-case $CHANNEL in ''|*[!a-z0-9._-]*) die "invalid channel '$CHANNEL' (allowed: a-z 0-9 . _ -)" ;; esac
+case $CHANNEL in ''|.|..|*[!a-z0-9._-]*) die "invalid channel '$CHANNEL' (allowed: a-z 0-9 . _ -)" ;; esac
+case $REPO_URL in *[!A-Za-z0-9._~:/%@+-]*) die "repository URL contains unsupported characters" ;; esac
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
 # shellcheck source=/dev/null
@@ -49,23 +50,22 @@ case " ${ID_LIKE:-} $ID " in
   *) die "unsupported distribution '$ID' (M1 supports Debian 13 and Fedora)" ;;
 esac
 
-# Print the packages (one per line) that removing "$@" would also take with it.
-plan_debian() {
-  apt-get -s remove --purge --auto-remove "$@" | awk '/^(Remv|Purg) / {print $2}' | sort -u
+in_set() { printf '%s\n' "$2" | grep -Fqx -- "$1"; }
+# set_diff "A" "B": lines of A not in B.
+set_diff() {
+  printf '%s\n' "$1" | while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    in_set "$line" "$2" || printf '%s\n' "$line"
+  done
 }
-plan_fedora() {
-  dnf remove --assumeno "$@" 2>&1 | awk '
-    /^Transaction Summary/ {insec=0}
-    insec && /^ +[^ ]/ && $1 !~ /:$/ {print $1}
-    /^Removing/ {insec=1}' | sort -u
-}
+preview_fail() { die "could not preview the removal; nothing was changed${1:+ ($1)}"; }
 
 # Refuse when the removal would take out a package the user installed themselves.
 check_plan() {
-  manual=$1; shift
-  for p in "$@"; do
+  manual=$1; plan=$2
+  for p in $plan; do
     case $p in emcomm-*) continue ;; esac
-    if printf '%s\n' "$manual" | grep -qx "$p"; then
+    if in_set "$p" "$manual"; then
       echo "bootstrap: removing emcomm would also remove '$p', which you installed yourself." >&2
       echo "  Remove '$p' first (it depends on emcomm), then re-run the uninstall." >&2
       echo "  Nothing was changed." >&2
@@ -74,43 +74,79 @@ check_plan() {
   done
 }
 
+# Every package we asked to remove must be in the parsed plan (else the parse failed).
+check_covers() {
+  for p in $1; do in_set "$p" "$2" || preview_fail "$p missing from the plan"; done
+}
+
 uninstall() {
+  LC_ALL=C; export LC_ALL
   echo "emcommOS uninstall will remove:"
   echo "  - the emcomm-* packages and any dependencies that only they needed (listed below)"
   echo "  - the emcommOS repository and signing key, and the Debian backports source and pin"
   echo "  - emcomm user units and udev rules, and /etc/emcomm (including your station kits)"
   echo "Your files in ~/.config and app settings are kept; group memberships and chrony stay."
+  pkgs=""; MODE="none"
   if [ "$FAMILY" = debian ]; then
     pkgs=$(dpkg-query -W -f='${db:Status-Abbrev}${Package}\n' 'emcomm-*' 2>/dev/null \
-           | awk '/^(ii|hi|rc)/ {print substr($0, 4)}' | tr -d ' ')
+           | awk '/^(ii|hi|rc)/ {print substr($0, 4)}' | tr -d ' ') || preview_fail dpkg-query
     if [ -n "$pkgs" ]; then
+      base_out=$(apt-get -s autoremove) || preview_fail "apt-get autoremove simulation"
+      baseline=$(printf '%s\n' "$base_out" | awk '/^Remv / {print $2}' | sort -u)
       # shellcheck disable=SC2086
-      plan=$(plan_debian $pkgs)
-      echo "Packages that will be removed (purged):"; echo "$plan" | sed 's/^/    /'
-      # shellcheck disable=SC2086
-      check_plan "$(apt-mark showmanual)" $plan
+      plan_out=$(apt-get -s remove --purge --auto-remove $pkgs) || preview_fail "apt-get simulation"
+      plan=$(printf '%s\n' "$plan_out" | awk '/^(Remv|Purg) / {print $2}' | sort -u)
+      check_covers "$pkgs" "$plan"
+      manual=$(apt-mark showmanual) || preview_fail "apt-mark"
+      [ -n "$manual" ] || preview_fail "empty manual package list"
+      # Packages already unneeded before we started are not ours to remove.
+      todo=$(set_diff "$plan" "$baseline")
+      check_covers "$pkgs" "$todo"
+      check_plan "$manual" "$todo"
+      if [ -n "$baseline" ]; then
+        MODE="split"
+      else
+        MODE="auto"
+      fi
+      echo "Packages that will be removed (purged):"; echo "$todo" | sed 's/^/    /'
     fi
   else
-    pkgs=$(rpm -qa --qf '%{NAME}\n' 'emcomm-*')
+    pkgs=$(rpm -qa --qf '%{NAME}\n' 'emcomm-*') || preview_fail rpm
     if [ -n "$pkgs" ]; then
       # shellcheck disable=SC2086
-      plan=$(plan_fedora $pkgs)
+      plan_out=$(dnf remove --assumeno $pkgs 2>&1) || true
+      plan=$(printf '%s\n' "$plan_out" | awk '
+        /^Transaction Summary/ {insec=0}
+        insec && /^ +[^ ]/ && $1 !~ /:$/ {print $1}
+        /^Removing/ {insec=1}' | sort -u)
+      check_covers "$pkgs" "$plan"
+      manual=$(dnf -q repoquery --userinstalled --qf '%{name}\n') || preview_fail "dnf repoquery"
+      [ -n "$manual" ] || preview_fail "empty user-installed package list"
+      check_plan "$manual" "$plan"
+      MODE="dnf"
       echo "Packages that will be removed:"; echo "$plan" | sed 's/^/    /'
-      # shellcheck disable=SC2086
-      check_plan "$(dnf -q repoquery --userinstalled --qf '%{name}\n' 2>/dev/null)" $plan
     fi
   fi
   confirm "Remove emcommOS?"
   if [ "$FAMILY" = debian ]; then
-    if [ -n "$pkgs" ]; then
-      # shellcheck disable=SC2086
-      apt-get remove --purge --auto-remove -y $pkgs
-    fi
+    case $MODE in
+      auto)
+        # shellcheck disable=SC2086
+        apt-get remove --purge --auto-remove -y $pkgs ;;
+      split)
+        # shellcheck disable=SC2086
+        apt-get remove --purge -y $pkgs
+        after_out=$(apt-get -s autoremove) || die "could not list newly unneeded packages"
+        after=$(printf '%s\n' "$after_out" | awk '/^Remv / {print $2}' | sort -u)
+        new=$(set_diff "$after" "$baseline")
+        # shellcheck disable=SC2086
+        [ -z "$new" ] || apt-get purge -y $new ;;
+    esac
     rm -f /etc/apt/sources.list.d/emcomm.sources /etc/apt/sources.list.d/emcomm-backports.sources \
           /etc/apt/preferences.d/emcomm-backports.pref /usr/share/keyrings/emcomm-archive-keyring.asc
     apt-get update -qq || true
   else
-    if [ -n "$pkgs" ]; then
+    if [ "$MODE" = dnf ]; then
       # shellcheck disable=SC2086
       dnf -y remove $pkgs
     fi
@@ -147,7 +183,7 @@ fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL --proto '=https,file' "$REPO_URL/$CHANNEL/emcomm-archive-keyring.asc" -o "$tmp/key.asc"
+curl -fsSL --proto '=https,file' --proto-redir '=https,file' "$REPO_URL/$CHANNEL/emcomm-archive-keyring.asc" -o "$tmp/key.asc"
 keys=$(GNUPGHOME="$tmp" gpg --batch --show-keys --with-colons "$tmp/key.asc")
 npub=$(printf '%s\n' "$keys" | grep -c '^pub:' || true)
 [ "$npub" -eq 1 ] ||
@@ -158,6 +194,9 @@ fpr=$(printf '%s\n' "$keys" | awk -F: '/^fpr/ {print $10; exit}')
 # Install only a re-export of the pinned key, never the downloaded file itself.
 GNUPGHOME="$tmp" gpg --batch --import "$tmp/key.asc" 2>/dev/null
 GNUPGHOME="$tmp" gpg --batch --armor --export "$EMCOMM_KEY_FINGERPRINT" > "$tmp/pinned.asc"
+[ -s "$tmp/pinned.asc" ] || die "could not export the pinned key"
+[ "$(gpg --batch --show-keys --with-colons "$tmp/pinned.asc" 2>/dev/null | grep -c '^pub:')" -eq 1 ] ||
+  die "exported key file does not contain exactly one key"
 
 if [ "$FAMILY" = debian ]; then
   install -m 0644 "$tmp/pinned.asc" /usr/share/keyrings/emcomm-archive-keyring.asc
