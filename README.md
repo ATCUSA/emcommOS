@@ -1,0 +1,81 @@
+# emcommOS
+
+Distro-agnostic provisioning for ham radio / emergency-communications laptops:
+current builds of hamlib, WSJT-X, JS8Call, fldigi, Direwolf, Pat and friends from signed
+deb/rpm repositories, an Ansible collection to set the station up, and an `emcomm` CLI that
+wires every app to your radio from operator + station profiles.
+
+Status: **M1 (core station)**: Debian 13 and Fedora 43/44 on amd64 and arm64; the only
+channel is `testing`. Design: `docs/superpowers/specs/2026-10-05-emcommos-design.md`.
+Source: https://github.com/ATCUSA/emcommOS (public). Licensed under Apache-2.0.
+
+## Where the software comes from
+
+For each application family, in order:
+
+1. the **distro package** (or the official Debian backports, pinned to just the packages we
+   need) when it is current enough;
+2. an **upstream prebuilt binary**, pinned by sha256;
+3. a **source build** in a clean container.
+
+The decision for each family is recorded in `recipes/` and reviewed with
+`emcomm-build freshness`. Everything we package installs under `/opt/emcomm`; outside it,
+only `/etc/profile.d/emcomm.sh` and `/usr/lib/environment.d/50-emcomm.conf` are added.
+Packages are signed with a dedicated project key whose fingerprint is pinned in `bootstrap.sh`.
+
+rigctld comes from hamlib 4.7.2 or newer (Debian: backports; Fedora: our build) for the CVE
+fixes. It listens only on `127.0.0.1:4532`, and apps reach the radio only through it.
+
+## Install a station
+
+The repository URL is configuration, not hardcoded: set `EMCOMM_REPO_URL` to the base URL
+the maintainers publish (https:// only; no trailing slash).
+
+```bash
+curl -fsSL "$EMCOMM_REPO_URL/bootstrap.sh" | sudo EMCOMM_REPO_URL="$EMCOMM_REPO_URL" sh
+```
+
+Then:
+
+```bash
+emcomm operator add K7ABC --grid DN16bk --name "Your Name"
+sudo emcomm station add kita --radio icom-ic7300     # auto-detects the plugged-in radio
+emcomm use K7ABC --station kita                       # shows a diff, then updates app configs
+systemctl --user enable --now emcomm-rigctld          # CAT/PTT hub on 127.0.0.1:4532
+```
+
+`emcomm radios` lists supported radios. Every app talks to the radio through rigctld on
+127.0.0.1:4532, so switching radios or operators is one command.
+
+### Your own machine (BYOD)
+
+emcommOS never changes a machine without showing what it will do and asking first
+(`--yes` for unattended runs). Standalone installs collect no data, and emcomm never writes
+operator secrets such as a Winlink password or APRS-IS passcode. App configs get managed
+keys only; your own settings in them are kept.
+
+Everything can be removed again:
+
+```bash
+sudo sh bootstrap.sh --uninstall     # or: sudo emcomm uninstall
+```
+
+It lists the packages it will remove (and refuses if that would take out something you
+installed yourself), then removes the emcomm packages, repository and key, the Debian
+backports source and pin, emcomm user units and udev rules, and `/etc/emcomm`. Your files in
+`~/.config`, group memberships (`dialout`, `audio`) and chrony are left alone.
+
+## Develop
+
+- Build tooling (Python, uv): `uv run --directory tools pytest -q`; build packages with
+  `uv run --directory tools emcomm-build build --target debian-13` (needs podman and nfpm;
+  CI gets both from the `.github/actions/setup-build-host` composite action, a Nix dev shell
+  will follow).
+- CLI: `uv run --directory cli pytest -q`.
+- Ansible: see `ansible/requirements-dev.txt`; `molecule test` in the collection directory.
+- Acceptance (needs podman, network and a published repo):
+  `tests/integration/repo-install.sh <debian-13|fedora-43|fedora-44> "$EMCOMM_REPO_URL"`.
+  Manual hardware checks: `docs/testing/m1-manual-checks.md`.
+- Maintainers: `docs/maintainer/setup.md`.
+
+Prior art that inspired ideas (no code reused): EmComm Tools Community, 73Linux.
