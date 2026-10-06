@@ -44,6 +44,15 @@ def render_pat(existing: str | None, ctx: RenderContext) -> str:
             raise ValueError(f"pat config.json is not valid JSON: {exc}") from None
     else:
         data = copy.deepcopy(PAT_DEFAULTS)
+
+    if not isinstance(data, dict):
+        raise TypeError("pat config.json must be a JSON object")
+
+    # Validate managed sections are dicts if they exist
+    for section_name in ("hamlib_rigs", "ardop", "varahf", "ax25"):
+        if section_name in data and not isinstance(data[section_name], dict):
+            raise TypeError(f"pat config.json section '{section_name}' must be a JSON object")
+
     data["mycall"] = ctx.operator.callsign
     if ctx.operator.grid:
         data["locator"] = ctx.operator.grid
@@ -55,4 +64,4 @@ def render_pat(existing: str | None, ctx: RenderContext) -> str:
         section["rig"] = "emcomm"
         section["ptt_ctrl"] = ptt_ctrl
     data.setdefault("ax25", {})["rig"] = "emcomm"
-    return json.dumps(data, indent=2) + "\n"
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"

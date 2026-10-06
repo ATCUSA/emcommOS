@@ -68,8 +68,37 @@ def test_rigctld_args():
         'RIGCTLD_ARGS="-m 1 -T 127.0.0.1 -t 4532"\n')
 
 
-def test_rigctld_args_rejects_whitespace_in_set_conf():
+@pytest.mark.parametrize("forbidden_char", ['"', '\\', '$', '\n', '\t', '\r', ' '])
+def test_render_rigctld_rejects_forbidden_chars_in_set_conf(forbidden_char):
+    """Test that render_rigctld rejects set_conf values with forbidden characters."""
     bad_radio = RadioDef(id="bad", vendor="Bad", model="Radio", hamlib_model=1, baud=9600,
-                         ptt="vox", set_conf=(("k", "a b"),))
+                         ptt="vox", set_conf=(("k", f"a{forbidden_char}b"),))
     with pytest.raises(ValueError, match="forbidden"):
-        rigctld_args(c(bad_radio))
+        render_rigctld(None, c(bad_radio))
+
+
+def test_pat_rejects_non_dict_root():
+    """Test that pat rejects JSON that isn't an object at root."""
+    with pytest.raises(TypeError, match="must be a JSON object"):
+        render_pat("[]", c(IC7300))
+    with pytest.raises(TypeError, match="must be a JSON object"):
+        render_pat("null", c(IC7300))
+
+
+def test_pat_rejects_non_dict_managed_section():
+    """Test that pat rejects non-dict values in managed sections."""
+    # ardop is null instead of dict
+    with pytest.raises(TypeError, match="ardop.*must be a JSON object"):
+        render_pat(json.dumps({"ardop": None}), c(IC7300))
+    # hamlib_rigs is null instead of dict
+    with pytest.raises(TypeError, match="hamlib_rigs.*must be a JSON object"):
+        render_pat(json.dumps({"hamlib_rigs": None}), c(IC7300))
+
+
+def test_pat_preserves_non_ascii_and_unknown_keys():
+    """Test that pat preserves non-ASCII in motd and unknown keys."""
+    existing = json.dumps({"mycall": "N0CALL", "motd": ["Café ☕"], "unknown_key": "preserved"})
+    rendered = render_pat(existing, c(IC7300))
+    data = json.loads(rendered)
+    assert data["motd"] == ["Café ☕"]
+    assert data["unknown_key"] == "preserved"

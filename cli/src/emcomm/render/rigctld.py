@@ -2,25 +2,22 @@
 
 from __future__ import annotations
 
-from .context import RenderContext
+from .context import RIGCTLD_ADDR, RenderContext
 
 DUMMY_MODEL = 1
 
-# Characters that would break systemd EnvironmentFile word-splitting
-FORBIDDEN_CHARS = {' ', '"', '\\', '$', '\n'}
-
 
 def _validate_arg(arg: str) -> None:
-    """Reject arguments containing characters that break systemd EnvironmentFile parsing."""
-    for char in FORBIDDEN_CHARS:
-        if char in arg:
-            raise ValueError(
-                f"argument contains forbidden character {char!r}: {arg!r}"
-            )
+    """Reject arguments containing whitespace or special chars that break systemd EnvironmentFile."""
+    if any(ch.isspace() or ch in '"\\$' for ch in arg):
+        raise ValueError(f"argument contains forbidden characters: {arg!r}")
 
 
 def rigctld_args(ctx: RenderContext) -> list[str]:
-    args = ["-m", str(ctx.radio.hamlib_model), "-T", "127.0.0.1", "-t", "4532"]
+    # Parse RIGCTLD_ADDR to extract host and port
+    host, port = RIGCTLD_ADDR.split(":")
+
+    args = ["-m", str(ctx.radio.hamlib_model), "-T", host, "-t", port]
     has_cat = ctx.station.cat is not None
     if ctx.radio.hamlib_model != DUMMY_MODEL and has_cat:
         args += ["-r", ctx.station.cat_link, "-s", str(ctx.radio.baud)]
