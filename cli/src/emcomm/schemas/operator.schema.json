@@ -4,8 +4,8 @@
   "additionalProperties": false,
   "required": ["callsign"],
   "properties": {
-    "callsign": {"type": "string"},
-    "name": {"type": "string"},
-    "grid": {"type": "string"}
+    "callsign": {"type": "string", "pattern": "\\A[^\\x00-\\x1f\\x7f]*\\Z"},
+    "name": {"type": "string", "pattern": "\\A[^\\x00-\\x1f\\x7f]*\\Z"},
+    "grid": {"type": "string", "pattern": "\\A[^\\x00-\\x1f\\x7f]*\\Z"}
   }
 }

@@ -27,6 +27,8 @@ def test_grid():
 def test_ax25_callsign():
     assert ax25_callsign("VE7/K7ABC") == "K7ABC"
     assert ax25_callsign("K7ABC/P") == "K7ABC"
+    assert ax25_callsign("VK9/K7A") == "K7A"
+    assert ax25_callsign("W1AW") == "W1AW"
 
 
 def test_station_derived_names():

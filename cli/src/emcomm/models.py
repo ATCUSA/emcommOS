@@ -31,7 +31,19 @@ def normalize_grid(raw: str) -> str:
 def ax25_callsign(callsign: str) -> str:
     """Base call without portable prefixes/suffixes (AX.25 allows at most 6 chars + SSID)."""
     parts = [p for p in callsign.split("/") if any(c.isdigit() for c in p)]
-    return max(parts, key=len) if parts else callsign
+    if not parts:
+        return callsign
+
+    def has_digit_then_letter(s: str) -> bool:
+        """Check if string has a digit followed (later) by a letter."""
+        for i, c in enumerate(s):
+            if c.isdigit() and any(ch.isalpha() for ch in s[i + 1 :]):
+                return True
+        return False
+
+    # Prefer parts matching base-callsign shape (digit followed by letter);
+    # on ties prefer later part
+    return max(parts, key=lambda p: (has_digit_then_letter(p), parts.index(p)))
 
 
 @dataclass(frozen=True)

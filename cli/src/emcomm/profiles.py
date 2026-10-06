@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 
@@ -12,10 +13,24 @@ from .paths import Paths
 from .validation import ProfileError, validate
 
 
-def _write_toml(path: Path, data: dict) -> Path:
+def _write_toml(path: Path, data: dict, mode: int | None = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(tomli_w.dumps(data))
+    if mode is not None:
+        # Write with specific mode for sensitive files
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(tomli_w.dumps(data))
+        except Exception:
+            fd_close_safe = fd
+            try:
+                os.close(fd_close_safe)
+            except OSError:
+                pass
+            raise
+    else:
+        tmp.write_text(tomli_w.dumps(data))
     tmp.replace(path)
     return path
 
@@ -38,7 +53,14 @@ def save_operator(paths: Paths, op: Operator) -> Path:
     if op.grid:
         data["grid"] = op.grid
     validate("operator", data, "operator")
-    return _write_toml(operator_path(paths, op.callsign), data)
+
+    # Create user_config and operators_dir with mode 0o700 (private)
+    paths.user_config.mkdir(mode=0o700, parents=True, exist_ok=True)
+    paths.user_config.chmod(0o700)
+    paths.operators_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    paths.operators_dir.chmod(0o700)
+
+    return _write_toml(operator_path(paths, op.callsign), data, mode=0o600)
 
 
 def _operator_from(data: dict, where: Path) -> Operator:

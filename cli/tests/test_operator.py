@@ -1,3 +1,5 @@
+import stat
+
 from emcomm.cli import main
 
 
@@ -30,3 +32,25 @@ def test_show_missing(paths, capsys):
 def test_list_empty(paths, capsys):
     assert main(["operator", "list"], paths=paths) == 0
     assert "no operators yet" in capsys.readouterr().out
+
+
+def test_operator_file_permissions(paths):
+    """Operator file should be readable only by owner (0o600)."""
+    assert main(["operator", "add", "k7abc"], paths=paths) == 0
+    op_file = paths.operators_dir / "k7abc.toml"
+    assert op_file.is_file()
+
+    # Check file permissions (0o600)
+    file_stat = op_file.stat()
+    file_mode = stat.S_IMODE(file_stat.st_mode)
+    assert file_mode == 0o600
+
+
+def test_operators_dir_permissions(paths):
+    """Operators directory should be readable only by owner (0o700)."""
+    assert main(["operator", "add", "k7abc"], paths=paths) == 0
+
+    # Check operators_dir permissions (0o700)
+    dir_stat = paths.operators_dir.stat()
+    dir_mode = stat.S_IMODE(dir_stat.st_mode)
+    assert dir_mode == 0o700

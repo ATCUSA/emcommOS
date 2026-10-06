@@ -4,9 +4,9 @@
   "additionalProperties": false,
   "required": ["id", "vendor", "model", "hamlib_model", "baud", "ptt"],
   "properties": {
-    "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
-    "vendor": {"type": "string", "minLength": 1},
-    "model": {"type": "string", "minLength": 1},
+    "id": {"type": "string", "pattern": "\\A[a-z0-9]+(-[a-z0-9]+)*\\Z"},
+    "vendor": {"type": "string", "minLength": 1, "pattern": "\\A[^\\x00-\\x1f\\x7f]*\\Z"},
+    "model": {"type": "string", "minLength": 1, "pattern": "\\A[^\\x00-\\x1f\\x7f]*\\Z"},
     "hamlib_model": {"type": "integer", "minimum": 1},
     "baud": {"enum": [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]},
     "ptt": {"enum": ["cat", "rts", "dtr", "vox"]},
@@ -26,11 +26,11 @@
         "additionalProperties": false,
         "minProperties": 1,
         "properties": {
-          "vendor_id": {"type": "string", "pattern": "^[0-9a-f]{4}$"},
-          "product_id": {"type": "string", "pattern": "^[0-9a-f]{4}$"},
-          "serial_prefix": {"type": "string"},
-          "product_contains": {"type": "string"},
-          "interface": {"type": "string", "pattern": "^[0-9a-f]{2}$"}
+          "vendor_id": {"type": "string", "pattern": "\\A[0-9a-f]{4}\\Z"},
+          "product_id": {"type": "string", "pattern": "\\A[0-9a-f]{4}\\Z"},
+          "serial_prefix": {"type": "string", "pattern": "\\A[^\\x00-\\x1f\\x7f]*\\Z"},
+          "product_contains": {"type": "string", "pattern": "\\A[^\\x00-\\x1f\\x7f]*\\Z"},
+          "interface": {"type": "string", "pattern": "\\A[0-9a-f]{2}\\Z"}
         }
       }
     }
