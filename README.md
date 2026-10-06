@@ -35,6 +35,11 @@ the maintainers publish (https:// only; no trailing slash).
 curl -fsSL "$EMCOMM_REPO_URL/bootstrap.sh" | sudo EMCOMM_REPO_URL="$EMCOMM_REPO_URL" sh
 ```
 
+`bootstrap.sh --no-provision` only installs the `emcomm` CLI. On Debian it does not yet add
+the trixie-backports source and pin that hamlib/WSJT-X/Direwolf come from, so run
+`sudo emcomm bootstrap` to finish before installing toolsets yourself (a manual
+`apt install emcomm-core` needs that step first).
+
 Then:
 
 ```bash
@@ -87,9 +92,14 @@ sudo sh bootstrap.sh --uninstall     # or: sudo emcomm uninstall
 ```
 
 It lists the packages it will remove (and refuses if that would take out something you
-installed yourself), then removes the emcomm packages, repository and key, the Debian
-backports source and pin, emcomm user units and udev rules, and `/etc/emcomm`. Your files in
-`~/.config`, group memberships (`dialout`, `audio`) and chrony are left alone.
+installed yourself), then removes the emcomm packages, repository and key (on Fedora also from
+the RPM database), the Debian backports source and pin, emcomm user units and udev rules,
+`/opt/emcomm` and `/etc/emcomm`. Stop running services first, as each user:
+`systemctl --user disable --now emcomm-rigctld emcomm-direwolf emcomm-pat`.
+
+Kept, per user: `~/.config/emcomm`, the settings in app configs,
+`~/.config/pipewire/pipewire.conf.d/60-emcomm-*.conf`, and enabled user-unit symlinks;
+group memberships (`dialout`, `audio`) and chrony are left alone too.
 
 ## Develop
 

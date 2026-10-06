@@ -3,6 +3,10 @@
 One-time setup for package signing, hosting, and CI. Use a dedicated project key,
 not anyone's personal identity.
 
+> **TODO (before the first public release):** packages carry the placeholder maintainer
+> `emcommOS maintainers <maintainers@emcommos.invalid>` (`MAINTAINER` in
+> `tools/src/emcomm_build/package.py`). Replace it with a real project contact address.
+
 ## 1. Project signing key
 
 Do this on a trusted machine. The primary key is certify-only and stays offline;
