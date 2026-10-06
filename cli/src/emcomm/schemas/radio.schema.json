@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "vendor", "model", "hamlib_model", "baud", "ptt"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+    "vendor": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1},
+    "hamlib_model": {"type": "integer", "minimum": 1},
+    "baud": {"enum": [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]},
+    "ptt": {"enum": ["cat", "rts", "dtr", "vox"]},
+    "set_conf": {"type": "object", "additionalProperties": {"type": ["string", "integer"]}},
+    "usb_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"cat": {"$ref": "#/$defs/hints"}, "audio": {"$ref": "#/$defs/hints"}}
+    },
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "hints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "vendor_id": {"type": "string", "pattern": "^[0-9a-f]{4}$"},
+          "product_id": {"type": "string", "pattern": "^[0-9a-f]{4}$"},
+          "serial_prefix": {"type": "string"},
+          "product_contains": {"type": "string"},
+          "interface": {"type": "string", "pattern": "^[0-9a-f]{2}$"}
+        }
+      }
+    }
+  }
+}
