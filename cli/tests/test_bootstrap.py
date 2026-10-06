@@ -51,6 +51,17 @@ def test_bootstrap_declined(paths, monkeypatch):
     assert main(["bootstrap", "--repo-url", "https://r"], paths=paths) == 1
 
 
+def test_bootstrap_eof_at_prompt_is_no(paths, monkeypatch, capsys):
+    monkeypatch.setattr(bs.os, "geteuid", lambda: 0)
+
+    def eof(_p):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    assert main(["bootstrap", "--repo-url", "https://r"], paths=paths) == 1
+    assert "aborted; nothing was changed" in capsys.readouterr().out
+
+
 def test_bootstrap_needs_root(paths, monkeypatch, capsys):
     monkeypatch.setattr(bs.os, "geteuid", lambda: 1000)
     assert main(["bootstrap", "--repo-url", "https://r", "--yes"], paths=paths) == 1

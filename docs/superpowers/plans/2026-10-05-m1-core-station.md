@@ -14,7 +14,7 @@
 
 - License Apache-2.0. Copy no code or data from EmComm Tools or 73Linux; write radio definitions from manufacturer and hamlib facts.
 - Sourcing order per family: distro package if current enough → upstream prebuilt binary (sha256-pinned) → source build. Decisions are recorded in recipes/metapackages and reviewed with `emcomm-build freshness`.
-- Everything we package installs under `/opt/emcomm` (`libdir=/opt/emcomm/lib`, rpath `/opt/emcomm/lib`). Outside it, packages may only add `/etc/profile.d/emcomm.sh` and `/usr/lib/environment.d/50-emcomm.conf` (from `emcomm-base`).
+- Everything we package installs under `/opt/emcomm` (`libdir=/opt/emcomm/lib`, rpath `/opt/emcomm/lib`). Outside it, packages may only add `/etc/profile.d/emcomm.sh` and `/usr/lib/environment.d/50-emcomm.conf` (from `emcomm-base`), plus `emcomm-cli`'s `/usr/bin/emcomm` symlink to `/opt/emcomm/bin/emcomm` (so `sudo emcomm` works under sudo's secure_path).
 - BYOD: never change a machine without showing the change and getting confirmation (`--yes` for unattended). Everything must be removable with `bootstrap.sh --uninstall` / `emcomm uninstall`. Standalone installs collect no data.
 - Package name is `emcomm-<recipe name>`. Every package except `emcomm-base` depends on `emcomm-base`.
 - M1 targets are `debian-13`, `fedora-44`, `fedora-43` × `amd64`, `arm64`. The only channel is `testing`.

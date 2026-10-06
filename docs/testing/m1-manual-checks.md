@@ -24,6 +24,6 @@ checks (2â€“3, 11) when you have physical access to a radio; the LAN checks (12â
    emcomm-direwolf` shows the EMCOMM audio device opened and PTT via RIG.
 9. **Pat**: `systemctl --user start emcomm-pat`; http://localhost:8080 loads; Settings shows
    rig "emcomm"; a telnet CMS connection works (enter Winlink password in Pat).
-10. **Operator switch**: `emcomm operator add <CALL2>`; `emcomm use <CALL2> --station kita`
+10. **Operator switch**: `emcomm operator add <CALL2> --grid <GRID2>`; `emcomm use <CALL2> --station kita`
     shows a diff of only call/grid lines; apply and confirm apps show the new call;
     previous files are in `~/.local/state/emcomm/backups/`.

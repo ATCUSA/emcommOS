@@ -5,7 +5,7 @@
 #   3. emcomm use renders WSJT-X.ini managed keys and keeps the user's own;
 #   4. uninstall removes every emcomm package, repo file, pin, unit and /etc/emcomm.
 # Usage: repo-install.sh <target> <repo-url> [channel]
-#   target: debian-13 | fedora-44 | fedora-43;  repo-url: https:// or file://
+#   target: debian-13 | fedora-44 | fedora-43;  repo-url: https://
 set -euo pipefail
 if [ $# -lt 2 ]; then
   echo "usage: $0 <debian-13|fedora-44|fedora-43> <repo-url> [channel]" >&2
@@ -37,10 +37,11 @@ podman run --rm -v "$root:/emcomm:ro,z" -e URL="$url" -e CHANNEL="$channel" "$im
     done
   }
 
+  export PATH=/opt/emcomm/bin:$PATH
   sh /emcomm/bootstrap.sh --repo-url "$URL" --channel "$CHANNEL" --no-provision --yes
+  /usr/bin/emcomm --help >/dev/null   # the sudo-visible symlink from emcomm-cli
   emcomm bootstrap --repo-url "$URL" --channel "$CHANNEL" --toolsets core --yes \
     --set emcomm_chrony_enable=false
-  export PATH=/opt/emcomm/bin:$PATH
 
   /opt/emcomm/libexec/emcomm-run rigctld -m 1 -T 127.0.0.1 -t 4532 &
   hub=$!
@@ -63,6 +64,9 @@ podman run --rm -v "$root:/emcomm:ro,z" -e URL="$url" -e CHANNEL="$channel" "$im
   test -z "$(leftovers)"
   absent "/etc/apt/sources.list.d/emcomm*" "/etc/apt/preferences.d/emcomm*" "/etc/yum.repos.d/emcomm*"
   test ! -e /etc/emcomm
+  absent "/usr/share/keyrings/emcomm-archive-keyring.asc" "/etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm"
+  test ! -e /usr/bin/emcomm && test ! -L /usr/bin/emcomm
+  test ! -e /opt/emcomm
   absent "/etc/systemd/user/emcomm-*"
   grep -qx "Font=Keep Me" ~/.config/WSJT-X.ini   # user files untouched by uninstall
   echo "M1 acceptance OK"

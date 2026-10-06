@@ -88,6 +88,13 @@ def _summary(data: dict) -> str:
     ])
 
 
+def _confirm() -> bool:
+    try:
+        return input("Continue? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
 def cmd_bootstrap(args: argparse.Namespace, paths: Paths) -> int:
     if not args.repo_url:
         raise ProfileError("set --repo-url or EMCOMM_REPO_URL")
@@ -98,7 +105,7 @@ def cmd_bootstrap(args: argparse.Namespace, paths: Paths) -> int:
     data = bootstrap_vars(args.repo_url, args.channel, args.toolsets, users,
                           parse_overrides(args.overrides))
     print(_summary(data))
-    if not args.yes and input("Continue? [y/N] ").strip().lower() not in ("y", "yes"):
+    if not args.yes and not _confirm():
         print("aborted; nothing was changed")
         return 1
     with tempfile.TemporaryDirectory() as tmp:

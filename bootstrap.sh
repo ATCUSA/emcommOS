@@ -84,7 +84,7 @@ uninstall() {
   echo "emcommOS uninstall will remove:"
   echo "  - the emcomm-* packages and any dependencies that only they needed (listed below)"
   echo "  - the emcommOS repository and signing key, and the Debian backports source and pin"
-  echo "  - emcomm user units and udev rules, and /etc/emcomm (including your station kits)"
+  echo "  - emcomm user units and udev rules, /opt/emcomm, and /etc/emcomm (including your station kits)"
   echo "Your files in ~/.config and app settings are kept; group memberships and chrony stay."
   pkgs=""; MODE="none"
   if [ "$FAMILY" = debian ]; then
@@ -163,7 +163,7 @@ uninstall() {
     rm -f /etc/yum.repos.d/emcomm-*.repo /etc/pki/rpm-gpg/RPM-GPG-KEY-emcomm
   fi
   rm -f /etc/systemd/user/emcomm-*.service /etc/udev/rules.d/70-emcomm-*.rules
-  rm -rf /etc/emcomm
+  rm -rf /etc/emcomm /opt/emcomm
   udevadm control --reload 2>/dev/null || true
   echo "emcommOS removed. Group memberships (dialout, audio) and chrony were left in place."
 }
@@ -236,6 +236,10 @@ fi
 if [ "$PROVISION" -eq 1 ]; then
   set -- --repo-url "$REPO_URL" --channel "$CHANNEL" --toolsets "$TOOLSETS"
   [ "$YES" -eq 1 ] && set -- "$@" --yes
-  exec /opt/emcomm/bin/emcomm bootstrap "$@"
+  if [ "$YES" -eq 1 ]; then
+    exec /opt/emcomm/bin/emcomm bootstrap "$@"
+  fi
+  # Under curl | sh stdin is the script; confirm() already proved /dev/tty opens.
+  exec /opt/emcomm/bin/emcomm bootstrap "$@" < /dev/tty
 fi
 echo "emcomm CLI installed; run 'sudo emcomm bootstrap' to finish setting up this machine."

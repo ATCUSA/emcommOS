@@ -123,7 +123,7 @@ One directory per package, `recipes/<name>/recipe.yaml`, of kind `source`, `preb
 `files`, or `meta`. A recipe can be limited to certain families
 (e.g. `families: [fedora]`). Meta recipes list our recipes (`requires`) and version-pinned
 distro packages per family. Built and prebuilt packages install under **`/opt/emcomm`** and
-never conflict with distro libraries.
+never conflict with distro libraries. The single exception outside `/opt/emcomm` (besides the `emcomm-base` profile/environment files) is `emcomm-cli`'s `/usr/bin/emcomm` symlink, so `sudo emcomm` works under sudo's secure_path.
 
 ### 4.3 Pipeline
 1. **watch-upstream** (scheduled): resolve the newest matching upstream tag and open a PR

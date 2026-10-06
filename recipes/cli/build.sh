@@ -8,6 +8,9 @@ share=$DESTDIR$PREFIX/share/emcomm
 mkdir -p "$DESTDIR$PREFIX/lib" "$DESTDIR$PREFIX/bin" "$share"
 cp -a "$venv" "$DESTDIR$PREFIX/lib/"
 ln -s ../lib/emcomm-cli/bin/emcomm "$DESTDIR$PREFIX/bin/emcomm"
+# The one file outside /opt/emcomm: lets `sudo emcomm` work under sudo's secure_path.
+mkdir -p "$DESTDIR/usr/bin"
+ln -s "$PREFIX/bin/emcomm" "$DESTDIR/usr/bin/emcomm"
 cp -a "$SRC/radios" "$share/radios"
 # Ship only our own collection: local dev trees also hold git-ignored third-party collections.
 mkdir -p "$share/ansible/ansible_collections"

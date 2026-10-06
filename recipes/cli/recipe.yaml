@@ -3,7 +3,7 @@ kind: app
 summary: emcommOS operator CLI, radio definitions, Ansible collection and bootstrap script
 license: Apache-2.0
 version: "0.1.0"
-release: 1
+release: 2
 source:
   type: local
   paths: [cli, radios, ansible, bootstrap.sh]
