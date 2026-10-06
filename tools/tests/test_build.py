@@ -97,3 +97,38 @@ def test_stage_errors_when_unavailable(setup, tmp_path):
 def test_host_arch(monkeypatch):
     monkeypatch.setattr(b.platform, "machine", lambda: "aarch64")
     assert b.host_arch() == "arm64"
+
+
+class _R:
+    def __init__(self, name):
+        self.name, self.package = name, f"emcomm-{name}"
+
+
+def test_package_path_guard():
+    ok = [{"dst": "/opt/emcomm/bin/x"}, {"dst": "/etc/profile.d/emcomm.sh"},
+          {"dst": "/usr/lib/environment.d/50-emcomm.conf"}]
+    b.check_package_paths(_R("hamlib"), ok)
+    b.check_package_paths(_R("cli"), [*ok, {"dst": "/usr/bin/emcomm"}])
+    with pytest.raises(b.BuildError, match="refusing to package /usr/bin/emcomm"):
+        b.check_package_paths(_R("hamlib"), [{"dst": "/usr/bin/emcomm"}])
+    with pytest.raises(b.BuildError, match="emcomm-pat: refusing to package /usr/lib/libx.so"):
+        b.check_package_paths(_R("pat"), [*ok, {"dst": "/usr/lib/libx.so"}])
+    with pytest.raises(b.BuildError, match="/opt/emcommx/y"):
+        b.check_package_paths(_R("pat"), [{"dst": "/opt/emcommx/y"}])
+    with pytest.raises(b.BuildError, match="non-normalized"):
+        b.check_package_paths(_R("pat"), [{"dst": "/opt/emcomm/../etc/passwd"}])
+
+
+def test_run_refuses_files_outside_prefix(setup, monkeypatch):
+    settings, calls = setup
+
+    def stray_build(engine, recipe, target, root, workdir):
+        dest = workdir / "destdir"
+        (dest / "usr/lib").mkdir(parents=True)
+        (dest / "usr/lib/libstray.so").write_text("x")
+        return dest, []
+
+    monkeypatch.setattr(b, "run_build", stray_build)
+    with pytest.raises(b.BuildError, match="emcomm-hamlib: refusing to package /usr/lib/libstray.so"):
+        b.run(settings)
+    assert ("package", "emcomm-hamlib") not in calls

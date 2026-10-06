@@ -27,6 +27,27 @@ class BuildError(Exception):
     """A build could not be completed."""
 
 
+PREFIX = "/opt/emcomm"
+# The only files a package may place outside /opt/emcomm (global constraints).
+ALLOWED_OUTSIDE = frozenset({"/etc/profile.d/emcomm.sh", "/usr/lib/environment.d/50-emcomm.conf"})
+ALLOWED_OUTSIDE_BY_RECIPE = {"cli": frozenset({"/usr/bin/emcomm"})}
+
+
+def check_package_paths(recipe: Recipe, contents: list[dict]) -> None:
+    """Refuse to package anything outside /opt/emcomm except the allowed files."""
+    allowed = ALLOWED_OUTSIDE | ALLOWED_OUTSIDE_BY_RECIPE.get(recipe.name, frozenset())
+    for entry in contents:
+        dst = entry["dst"]
+        parts = dst.split("/")
+        if ".." in parts or "." in parts or "" in parts[1:]:
+            raise BuildError(f"{recipe.package}: refusing non-normalized package path {dst}")
+        if dst == PREFIX or dst.startswith(PREFIX + "/") or dst in allowed:
+            continue
+        raise BuildError(
+            f"{recipe.package}: refusing to package {dst}: everything must live under {PREFIX} "
+            f"(allowed outside: {', '.join(sorted(allowed))})")
+
+
 @dataclass(frozen=True)
 class BuildSettings:
     root: Path
@@ -150,6 +171,7 @@ def run(settings: BuildSettings, *, recipes: dict[str, Recipe] | None = None) ->
             tree, runtime = None, []
 
         cfg = nfpm_config(r, target, arch, recipes, tree, runtime)
+        check_package_paths(r, cfg["contents"])
         out = settings.out / package_filename(r, target, arch)
         built.append(build_package(cfg, target.format, out, workdir))
 
