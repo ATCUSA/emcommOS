@@ -5,6 +5,11 @@ from __future__ import annotations
 from ..models import ax25_callsign
 from .context import RIGCTLD_ADDR, RenderContext
 
+AGW_EXPOSURE_WARNING = (
+    "warning: Dire Wolf's AGW port 8000 listens on all interfaces without authentication; "
+    "block TCP 8000 on untrusted networks."
+)
+
 
 def render_direwolf(existing: str | None, ctx: RenderContext) -> str | None:
     if not ctx.alsa_device:
@@ -19,5 +24,7 @@ def render_direwolf(existing: str | None, ctx: RenderContext) -> str | None:
     ]
     if ctx.ptt != "vox":
         lines.append(f"PTT RIG 2 {RIGCTLD_ADDR}")
-    lines += ["AGWPORT 8000", "KISSPORT 8001"]
+    # Pat talks AGW on 8000. Dire Wolf has no bind-address option (1.8.1 listens on all
+    # interfaces), so keep exposure minimal: KISSPORT 0 turns the KISS TCP listener off.
+    lines += ["AGWPORT 8000", "KISSPORT 0"]
     return "\n".join(lines) + "\n"

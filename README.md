@@ -51,6 +51,10 @@ session does not see them until `systemctl --user daemon-reload` (or a fresh log
 `emcomm radios` lists supported radios. Every app talks to the radio through rigctld on
 127.0.0.1:4532, so switching radios or operators is one command.
 
+Dire Wolf (for Pat packet) has no bind-address option: its AGW port 8000 listens on all
+interfaces without authentication, so block TCP 8000 in your firewall on untrusted networks.
+emcomm turns Dire Wolf's KISS TCP port off (`KISSPORT 0`); Pat uses AGW on localhost:8000.
+
 ### IC-7300MK2 over LAN with wfview
 
 wfview (installed with `emcomm-core`) can own an Icom radio reached over Ethernet; emcomm then

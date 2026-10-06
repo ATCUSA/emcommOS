@@ -188,3 +188,24 @@ def test_eof_and_empty_input_abort(paths, ready, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _p: "")
     assert main(["use", "K7ABC", "--station", "bench"], paths=paths) == 1
     assert not (paths.home / ".config/WSJT-X.ini").exists()
+
+
+def test_use_warns_about_direwolf_agw_exposure(paths, monkeypatch, capsys):
+    from sysfs import add_sound, make_usb
+    monkeypatch.setattr(use_cmd, "restart_services", lambda: True)
+    add_sound(paths.sysfs, make_usb(paths.sysfs, "1-2", "08bb", "2901"), "card1")
+    assert main(["operator", "add", "K7ABC"], paths=paths) == 0
+    assert main(["station", "add", "dw", "--radio", "generic-vox", "--audio", "card1",
+                 "--no-udev"], paths=paths) == 0
+    capsys.readouterr()
+    assert main(["use", "K7ABC", "--station", "dw", "--yes"], paths=paths) == 0
+    conf = (paths.home / ".config/emcomm/direwolf.conf").read_text()
+    assert "KISSPORT 0\n" in conf
+    assert ("AGW port 8000 listens on all interfaces without authentication; block TCP 8000 "
+            "on untrusted networks") in capsys.readouterr().err
+
+
+def test_use_without_direwolf_does_not_warn(paths, ready, capsys):
+    capsys.readouterr()
+    assert main(["use", "K7ABC", "--station", "bench", "--yes"], paths=paths) == 0
+    assert "AGW port 8000" not in capsys.readouterr().err

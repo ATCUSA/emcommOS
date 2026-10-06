@@ -12,6 +12,7 @@ from ..paths import Paths
 from ..profiles import load_operator, load_station
 from ..radios import load_radios
 from ..render.context import RenderContext
+from ..render.direwolf import AGW_EXPOSURE_WARNING
 from ..validation import ProfileError
 
 EMCOMM_WFVIEW = Path("/opt/emcomm/bin/wfview")  # tests monkeypatch this
@@ -60,6 +61,8 @@ def cmd_use(args: argparse.Namespace, paths: Paths) -> int:
     if not restart_services():
         print("note: could not restart emcomm user services; restart them yourself if running",
               file=sys.stderr)
+    if any(c.app == "direwolf" and not c.delete for c in changes):
+        print(AGW_EXPOSURE_WARNING, file=sys.stderr)
     if station.control == "wfview":
         print("note: start or restart wfview after `emcomm use` (it overwrites wfview.conf on "
               "exit), and before emcomm-rigctld.", file=sys.stderr)

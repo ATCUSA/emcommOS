@@ -227,6 +227,9 @@ Roles:
 
   wfview's server binds all interfaces without authentication, so firewall TCP 4533 on
   untrusted networks.
+- Dire Wolf (1.8.1) has no bind-address option, so its AGW port 8000 (used by Pat) listens on
+  all interfaces without authentication: emcomm renders `KISSPORT 0` to turn the KISS TCP
+  listener off, and `emcomm use` warns to block TCP 8000 on untrusted networks.
 - **Modes** (M2) are exclusive sets of user units, e.g. `ft8-js8`, `winlink-ardop`,
   `winlink-packet`, `aprs-digi`.
 

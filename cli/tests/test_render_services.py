@@ -52,6 +52,9 @@ def test_direwolf():
     assert "ADEVICE plughw:CARD=EMCOMM_KITA,DEV=0" in out
     assert "MYCALL K7ABC\n" in out
     assert "PTT RIG 2 127.0.0.1:4532" in out
+    assert "AGWPORT 8000\n" in out          # Pat uses AGW
+    assert "KISSPORT 0\n" in out            # KISS TCP listener off (no bind option in 1.8.1)
+    assert "8001" not in out
     assert "PTT" not in render_direwolf(None, c(VOX))
     assert render_direwolf(None, c(IC7300, Station(name="b", radio="x"))) is None
 
