@@ -7,3 +7,9 @@
     - emcomm-rigctld.service
     - emcomm-direwolf.service
     - emcomm-pat.service
+
+- name: Tell users to reload their systemd user manager
+  ansible.builtin.debug:
+    msg: >-
+      emcomm user units are in /etc/systemd/user. Each radio user runs
+      'systemctl --user daemon-reload' once (or logs in again) so systemd sees them.

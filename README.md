@@ -41,8 +41,12 @@ Then:
 emcomm operator add K7ABC --grid DN16bk --name "Your Name"
 sudo emcomm station add kita --radio icom-ic7300     # auto-detects the plugged-in radio
 emcomm use K7ABC --station kita                       # shows a diff, then updates app configs
+systemctl --user daemon-reload                        # once, so systemd sees the new user units
 systemctl --user enable --now emcomm-rigctld          # CAT/PTT hub on 127.0.0.1:4532
 ```
+
+`emcomm bootstrap` installs the emcomm user units in `/etc/systemd/user`; a running user
+session does not see them until `systemctl --user daemon-reload` (or a fresh login).
 
 `emcomm radios` lists supported radios. Every app talks to the radio through rigctld on
 127.0.0.1:4532, so switching radios or operators is one command.
